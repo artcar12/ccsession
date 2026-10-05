@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -425,10 +426,25 @@ def save_state(cfg, state):
     os.replace(tmp, os.path.join(cfg["state_dir"], "state.json"))
 
 
+def apply_override(row, overrides):
+    cls = (overrides or {}).get(row.get("id"))
+    if cls in ("work", "personal") and cls != row.get("class"):
+        row["class"], row["class_source"] = cls, "override"
+    return row
+
+
 def collect(cfg, state=None, full=False, check_live=True):
     """Returns (payload, new_file_state, stats). Only sessions whose transcript or desktop-index
     entry changed since `state` are included unless full=True."""
     state = state or {"files": {}}
+    overrides = state.get("overrides") or {}
+    # A session whose override changed since the last push is resent so the server gets the
+    # right detail level (re-classed to personal: full row; to work: already stripped server-side).
+    changed = set(overrides) ^ set(state.get("sent_overrides") or {}) | {
+        k for k, v in overrides.items() if (state.get("sent_overrides") or {}).get(k) != v}
+    files_state = {p: sig for p, sig in state["files"].items()
+                   if os.path.splitext(os.path.basename(p))[0].removeprefix("desktop:") not in changed}
+    state = dict(state, files=files_state)
     desktop = read_desktop_index(cfg["app_dirs"])
     seen_files = {}
     rows = {}
@@ -486,7 +502,7 @@ def collect(cfg, state=None, full=False, check_live=True):
         lv.update({"machine": cfg["machine"], "account": account, "class": cls, "project": project,
                    "title": meta.get("title") or lv["title"]})
         lv.pop("cwd", None)
-        live.append(redact_live(lv))
+        live.append(redact_live(apply_override(lv, overrides)))
         by_id[lv["id"]] = lv
 
     payload = {
@@ -495,7 +511,7 @@ def collect(cfg, state=None, full=False, check_live=True):
         "sent_at": int(time.time() * 1000),
         "full": full,
         "live": live,
-        "sessions": [redact(r) for r in rows.values()],
+        "sessions": [redact(apply_override(r, overrides)) for r in rows.values()],
     }
     stats["rows"] = len(payload["sessions"])
     stats["live"] = len(live)
@@ -509,8 +525,11 @@ def push(cfg, payload):
     if not target:
         raise RuntimeError("server.ssh is not set in config; use --dry-run")
     data = gzip.compress(json.dumps(payload, separators=(",", ":")).encode())
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", target, cfg["server"]["command"]],
-                       input=data, capture_output=True, timeout=cfg["server"]["timeout"])
+    if target == "local":  # run the server's ingest directly (dev, or the agent on the Linode itself)
+        argv = shlex.split(cfg["server"]["command"])
+    else:
+        argv = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", target, cfg["server"]["command"]]
+    r = subprocess.run(argv, input=data, capture_output=True, timeout=cfg["server"]["timeout"])
     if r.returncode != 0:
         raise RuntimeError(f"ingest exited {r.returncode}: {r.stderr.decode(errors='replace').strip()[:300]}")
     return r.stdout.decode(errors="replace").strip()
@@ -556,11 +575,16 @@ def main(argv=None):
     if digest == state.get("last_hash") and now - state.get("last_sent", 0) < args.heartbeat:
         return 0
     try:
-        push(cfg, payload)
+        reply = push(cfg, payload)
     except Exception as e:
         print(f"ccdash: push failed, will retry: {e}", file=sys.stderr)
         return 3  # same meaning as bin/board: server unreachable; cursor not advanced
-    state.update({"files": files, "last_hash": digest, "last_sent": now})
+    try:
+        overrides = json.loads(reply.splitlines()[-1]).get("overrides") or {}
+    except (ValueError, IndexError):
+        overrides = state.get("overrides") or {}
+    state.update({"files": files, "last_hash": digest, "last_sent": now,
+                  "sent_overrides": state.get("overrides") or {}, "overrides": overrides})
     save_state(cfg, state)
     return 0
 
