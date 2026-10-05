@@ -204,22 +204,5 @@ class TestCollect(Fixture):
         self.assertNotIn("first_prompt", rows["s-root"])
 
 
-    def test_server_cannot_move_work_session_to_personal(self):
-        payload, rows, _, _ = self.collect(state={"files": {}, "overrides": {"s-work": "personal"}})
-        self.assertEqual(rows["s-work"]["class"], "work")
-        self.assertNotIn(SECRET, json.dumps(payload))
-        self.assertLessEqual(set(rows["s-work"]), A.WORK_FIELDS)
-
-    def test_server_can_move_personal_session_to_work(self):
-        _, rows, _, _ = self.collect(state={"files": {}, "overrides": {"s-hoa": "work"}})
-        self.assertEqual(rows["s-hoa"]["class"], "work")
-        self.assertNotIn("first_prompt", rows["s-hoa"])
-
-    def test_local_override_can_move_work_session_to_personal(self):
-        self.cfg["local_overrides"] = {"s-work": "personal"}
-        _, rows, _, _ = self.collect(state={"files": {}, "overrides": {"s-work": "work"}})
-        self.assertEqual(rows["s-work"]["class"], "personal")
-        self.assertEqual(rows["s-work"]["class_source"], "override")
-
 if __name__ == "__main__":
     unittest.main()

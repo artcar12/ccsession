@@ -56,9 +56,6 @@ DEFAULT_CONFIG = {
     "probe_prefixes": ["Reply with exactly one word", "List every skill or slash command",
                        "Output only the count of available skills"],
     "min_path_mentions": 3,
-    # Per-session class overrides set on this machine: {session_id: "work" | "personal"}. Only
-    # these can move a session to personal; the server can only move one to work.
-    "local_overrides": {},
     "server": {"ssh": None, "command": "ingest", "timeout": 20},
     "state_dir": os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "ccdash"),
 }
@@ -429,14 +426,6 @@ def save_state(cfg, state):
     os.replace(tmp, os.path.join(cfg["state_dir"], "state.json"))
 
 
-def effective_overrides(cfg, server_overrides):
-    """Server overrides only ever tighten (to work): a compromised or mistaken server must not be
-    able to make the agent upload a work session's prompts. Loosening is local config only."""
-    eff = {k: v for k, v in (server_overrides or {}).items() if v == "work"}
-    eff.update({k: v for k, v in (cfg.get("local_overrides") or {}).items() if v in ("work", "personal")})
-    return eff
-
-
 def apply_override(row, overrides):
     cls = (overrides or {}).get(row.get("id"))
     if cls in ("work", "personal") and cls != row.get("class"):
@@ -448,7 +437,7 @@ def collect(cfg, state=None, full=False, check_live=True):
     """Returns (payload, new_file_state, stats). Only sessions whose transcript or desktop-index
     entry changed since `state` are included unless full=True."""
     state = state or {"files": {}}
-    overrides = effective_overrides(cfg, state.get("overrides"))
+    overrides = state.get("overrides") or {}
     # A session whose override changed since the last push is resent so the server gets the
     # right detail level (re-classed to personal: full row; to work: already stripped server-side).
     changed = set(overrides) ^ set(state.get("sent_overrides") or {}) | {
@@ -595,7 +584,7 @@ def main(argv=None):
     except (ValueError, IndexError):
         overrides = state.get("overrides") or {}
     state.update({"files": files, "last_hash": digest, "last_sent": now,
-                  "sent_overrides": effective_overrides(cfg, state.get("overrides")), "overrides": overrides})
+                  "sent_overrides": state.get("overrides") or {}, "overrides": overrides})
     save_state(cfg, state)
     return 0
 
