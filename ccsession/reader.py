@@ -159,7 +159,7 @@ def read_live(sessions_dir, check=True):
             "waiting_for": wf if isinstance(wf, str) else (json.dumps(wf) if wf else None),
             "entrypoint": d.get("entrypoint"),
             "started": to_ms(d.get("startedAt")),
-            "status_updated": to_ms(d.get("statusUpdatedAt")),
+            "status_since": to_ms(d.get("statusUpdatedAt")) or to_ms(d.get("startedAt")),
         })
     return out
 
@@ -175,15 +175,28 @@ def join_live(live, desktop, projects_root):
             "kind": meta.get("kind") or "cli",
             "project": project_of(meta.get("cwd") or lv.get("cwd"), projects_root),
             "title": meta.get("title") or lv.get("title"),
+            "archived": meta.get("archived", False),
+            "dormant": False,
         })
     return live
 
 
+def overlay_live(rows, live):
+    """Marks the index rows that have a live process: their live status, and not dormant."""
+    for lv in live:
+        row = rows.get(lv.get("id"))
+        if row:
+            row.update({k: lv.get(k) for k in ("status", "status_since", "waiting_for", "pid", "started",
+                                               "entrypoint")})
+            row["dormant"] = False
+    return rows
+
+
 # ---------------------------------------------------------------- desktop index
 
-def discover_data_dirs(app_support=APP_SUPPORT):
+def discover_data_dirs(app_support=None):
     """Every Claude* desktop data dir that has claude-code-sessions."""
-    return sorted(d for d in glob.glob(os.path.join(app_support, "Claude*"))
+    return sorted(d for d in glob.glob(os.path.join(app_support or APP_SUPPORT, "Claude*"))
                   if os.path.isdir(os.path.join(d, "claude-code-sessions")))
 
 
@@ -360,7 +373,10 @@ def build_session(scan, meta, cfg):
         "archived": meta.get("archived", False),
         "prs": meta.get("prs") or [],
         "host_session_id": meta.get("desktop_id"),
-        "desktop_id": meta.get("desktop_id"),
+        # Index rows assume no live process; overlay_live marks the live ones.
+        "status": None,
+        "status_since": None,
+        "dormant": bool(meta.get("kind")),
     }
 
 
@@ -413,7 +429,7 @@ def read_all(cfg, check_live=True):
     rows, _, stats = scan_index(cfg, full=True, desktop=desktop)
     live = join_live(read_live(os.path.join(cfg["claude_dir"], "sessions"), check=check_live),
                      desktop, cfg["projects_root"])
-    return live, list(rows.values()), stats
+    return live, list(overlay_live(rows, live).values()), stats
 
 
 # ---------------------------------------------------------------- cli

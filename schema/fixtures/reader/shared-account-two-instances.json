@@ -1,0 +1,102 @@
+{
+  "rule": "instance is the data dir name and account the account-id folder; one account id can sit under two instances.",
+  "config": {
+    "app_dirs": [
+      "{{HOME}}/Library/Application Support/Claude",
+      "{{HOME}}/Library/Application Support/Claude-personal"
+    ]
+  },
+  "dirs": [
+    "Projects/garden",
+    "Projects/toys"
+  ],
+  "files": {
+    "Library/Application Support/Claude/claude-code-sessions/0a1b2c3d-0000-4000-8000-000000000001/9e8d7c6b-0000-4000-8000-0000000000f1/local_a1.json": {
+      "sessionId": "local_a1",
+      "cliSessionId": "s-main",
+      "cwd": "{{HOME}}/Projects/garden",
+      "title": "Garden in the main instance",
+      "createdAt": 1790000000000,
+      "lastActivityAt": 1790000060000,
+      "isArchived": false
+    },
+    "Library/Application Support/Claude-personal/claude-code-sessions/0a1b2c3d-0000-4000-8000-000000000001/9e8d7c6b-0000-4000-8000-0000000000f1/local_a2.json": {
+      "sessionId": "local_a2",
+      "cliSessionId": "s-second",
+      "cwd": "{{HOME}}/Projects/toys",
+      "title": "Toys in the second instance",
+      "createdAt": 1790000000000,
+      "lastActivityAt": 1790000060000,
+      "isArchived": false
+    },
+    ".claude/projects/-garden/s-main.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "water the beds"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Done."
+            }
+          ]
+        }
+      }
+    ],
+    ".claude/projects/-toys/s-second.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/toys",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "sort the toys"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/toys",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Done."
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "live": {},
+    "sessions": {
+      "s-main": {
+        "kind": "code",
+        "instance": "Claude",
+        "account": "0a1b2c3d-0000-4000-8000-000000000001",
+        "host_session_id": "local_a1"
+      },
+      "s-second": {
+        "kind": "code",
+        "instance": "Claude-personal",
+        "account": "0a1b2c3d-0000-4000-8000-000000000001",
+        "host_session_id": "local_a2"
+      }
+    }
+  }
+}

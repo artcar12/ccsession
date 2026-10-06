@@ -55,6 +55,25 @@ Or straight from the checkout, with nothing installed: `python3 -m ccsession`.
   folder under `claude-code-sessions`. The same account id can appear under two instances.
 - Desktop records are matched to live sessions on `hostSessionId` and to transcripts on `cliSessionId`.
 - Cowork sessions are included with `kind: "cowork"`; sessions with no desktop record are `kind: "cli"`.
+- A session with a desktop record and no live process is `dormant`. `scan_index` rows assume nothing is
+  live; `read_all` marks the live ones (`overlay_live`).
+
+Each rule has a case in `schema/fixtures/reader/` that the tests run through the reader.
+
+## Session v1
+
+`schema/session.v1.json` (JSON Schema 2020-12) is the session shape: one object per session, live or
+indexed, with times in epoch milliseconds. It covers status (`waiting`, `idle`, `busy`, `unknown`,
+`error`, or `null` when not live), `status_since`, `dormant`, `archived`, `instance`, `account`, `kind`,
+`owner` (`{data_dir, pid}` for desktop sessions), `outcome` (`ok`, `error`, `interrupted`) and the error
+fields (`error_kind`, `api_status`, `resets_at`). `$defs/live` is the live snapshot
+(`{machine, now, sessions}`).
+
+The reader emits everything except `owner`, `outcome` and the error fields, which need the session
+daemon (owner resolution and transcript error detection).
+
+`schema/fixtures/sessions/` holds made-up Session v1 examples (desktop, CLI, Cowork, waiting, error, and a
+live snapshot) for programs that consume sessions to test against.
 
 ## As a library
 
@@ -71,7 +90,8 @@ rows, files, stats = ccsession.scan_index(cfg, files=files)  # only what changed
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests
+uv run python -m unittest discover -s tests   # with jsonschema (dev dependency) for the schema tests
+python3 -m unittest discover -s tests          # stdlib only; skips schema validation
 ```
 
 ## License

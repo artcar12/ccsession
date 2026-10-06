@@ -1,0 +1,30 @@
+{
+  "id": "5f0c2a7e-1b3d-4c8e-9a10-000000000004",
+  "kind": "cowork",
+  "instance": "Claude-personal",
+  "account": "0a1b2c3d-0000-4000-8000-000000000002",
+  "owner": {
+    "data_dir": "/Users/dev/Library/Application Support/Claude-personal",
+    "pid": null
+  },
+  "host_session_id": "local_00000000-0000-4000-8000-0000000000a4",
+  "project": "garden",
+  "project_source": "cwd",
+  "cwd": "/Users/dev/Projects/garden",
+  "branch": null,
+  "title": "Draft a seed catalogue",
+  "summary": "Catalogue half done",
+  "needs_user": false,
+  "first_prompt": "Draft a seed catalogue from my notes",
+  "last_prompt": "[Request interrupted by user]",
+  "last_reply": "Here is the first half of the catalogue.",
+  "prs": [],
+  "created": 1791100000000,
+  "last": 1791101200000,
+  "turns": 2,
+  "status": null,
+  "status_since": null,
+  "dormant": true,
+  "archived": true,
+  "outcome": "interrupted"
+}

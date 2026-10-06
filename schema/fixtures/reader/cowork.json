@@ -1,0 +1,64 @@
+{
+  "rule": "Cowork sessions are included with kind cowork; their transcript lives in the cowork dir and the project comes from the first selected folder.",
+  "config": {
+    "app_dirs": [
+      "{{HOME}}/Library/Application Support/Claude",
+      "{{HOME}}/Library/Application Support/Claude-personal"
+    ]
+  },
+  "dirs": [
+    "Projects/toys"
+  ],
+  "files": {
+    "Library/Application Support/Claude-personal/local-agent-mode-sessions/0a1b2c3d-0000-4000-8000-000000000002/9e8d7c6b-0000-4000-8000-0000000000f1/local_d1.json": {
+      "sessionId": "local_d1",
+      "cliSessionId": "s-cowork",
+      "title": "Cowork notes",
+      "userSelectedFolders": [
+        "{{HOME}}/Projects/toys"
+      ],
+      "isArchived": false
+    },
+    "Library/Application Support/Claude-personal/local-agent-mode-sessions/0a1b2c3d-0000-4000-8000-000000000002/9e8d7c6b-0000-4000-8000-0000000000f1/local_d1/.claude/projects/-vm/s-cowork.jsonl": [
+      {
+        "type": "user",
+        "cwd": "/sessions/vm-cwd",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "summarise my notes"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "/sessions/vm-cwd",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Done."
+            }
+          ]
+        }
+      }
+    ],
+    "Library/Application Support/Claude-personal/claude-code-sessions/.keep": ""
+  },
+  "expect": {
+    "live": {},
+    "sessions": {
+      "s-cowork": {
+        "kind": "cowork",
+        "instance": "Claude-personal",
+        "account": "0a1b2c3d-0000-4000-8000-000000000002",
+        "project": "toys",
+        "dormant": true,
+        "host_session_id": "local_d1",
+        "first_prompt": "summarise my notes"
+      }
+    }
+  }
+}

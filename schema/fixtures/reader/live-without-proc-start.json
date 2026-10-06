@@ -1,0 +1,45 @@
+{
+  "rule": "A live file with no procStart is kept if its pid is alive; a dead pid is dropped.",
+  "config": {
+    "app_dirs": [
+      "{{HOME}}/Library/Application Support/Claude",
+      "{{HOME}}/Library/Application Support/Claude-personal"
+    ]
+  },
+  "dirs": [
+    "Projects/garden"
+  ],
+  "files": {
+    ".claude/sessions/1.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-no-start",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "busy",
+      "entrypoint": "cli",
+      "startedAt": 1790000000000,
+      "statusUpdatedAt": 1790000030000
+    },
+    ".claude/sessions/2.json": {
+      "pid": "{{DEAD_PID}}",
+      "sessionId": "s-dead",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "busy",
+      "entrypoint": "cli",
+      "startedAt": 1790000000000,
+      "statusUpdatedAt": 1790000030000
+    }
+  },
+  "expect": {
+    "live": {
+      "s-no-start": {
+        "pid": "{{PID}}",
+        "status": "busy",
+        "status_since": 1790000030000,
+        "kind": "cli",
+        "project": "garden",
+        "dormant": false
+      }
+    },
+    "sessions": {}
+  }
+}

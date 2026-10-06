@@ -1,0 +1,96 @@
+{
+  "rule": "archived is the desktop record's isArchived.",
+  "config": {
+    "app_dirs": [
+      "{{HOME}}/Library/Application Support/Claude",
+      "{{HOME}}/Library/Application Support/Claude-personal"
+    ]
+  },
+  "dirs": [
+    "Projects/garden"
+  ],
+  "files": {
+    "Library/Application Support/Claude/claude-code-sessions/0a1b2c3d-0000-4000-8000-000000000001/9e8d7c6b-0000-4000-8000-0000000000f1/local_c1.json": {
+      "sessionId": "local_c1",
+      "cliSessionId": "s-archived",
+      "cwd": "{{HOME}}/Projects/garden",
+      "title": "Put away",
+      "createdAt": 1790000000000,
+      "lastActivityAt": 1790000060000,
+      "isArchived": true
+    },
+    "Library/Application Support/Claude/claude-code-sessions/0a1b2c3d-0000-4000-8000-000000000001/9e8d7c6b-0000-4000-8000-0000000000f1/local_c2.json": {
+      "sessionId": "local_c2",
+      "cliSessionId": "s-kept",
+      "cwd": "{{HOME}}/Projects/garden",
+      "title": "Still out",
+      "createdAt": 1790000000000,
+      "lastActivityAt": 1790000060000,
+      "isArchived": false
+    },
+    ".claude/projects/-garden/s-archived.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "old work"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Done."
+            }
+          ]
+        }
+      }
+    ],
+    ".claude/projects/-garden/s-kept.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "current work"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Done."
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "live": {},
+    "sessions": {
+      "s-archived": {
+        "archived": true,
+        "dormant": true
+      },
+      "s-kept": {
+        "archived": false
+      }
+    }
+  }
+}

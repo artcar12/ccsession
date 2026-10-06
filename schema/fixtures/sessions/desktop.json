@@ -1,0 +1,42 @@
+{
+  "id": "5f0c2a7e-1b3d-4c8e-9a10-000000000001",
+  "kind": "code",
+  "entrypoint": "claude-desktop",
+  "instance": "Claude",
+  "account": "0a1b2c3d-0000-4000-8000-000000000001",
+  "owner": {
+    "data_dir": "/Users/dev/Library/Application Support/Claude",
+    "pid": 4120
+  },
+  "host_session_id": "local_00000000-0000-4000-8000-0000000000a1",
+  "project": "garden",
+  "project_source": "cwd",
+  "cwd": "/Users/dev/Projects/garden/.claude/worktrees/calm-fern-1a2b3c",
+  "branch": "claude/calm-fern-1a2b3c",
+  "title": "Add a watering schedule",
+  "summary": "Schedule added; tests pass",
+  "needs_user": false,
+  "first_prompt": "Add a weekly watering schedule to the planner",
+  "last_prompt": "Looks good, commit it",
+  "last_reply": "Committed the schedule and its tests.",
+  "prs": [
+    {
+      "number": 12,
+      "url": "https://github.com/example/garden/pull/12",
+      "repo": "example/garden",
+      "state": "OPEN",
+      "branch": "claude/calm-fern-1a2b3c"
+    }
+  ],
+  "created": 1791200000000,
+  "last": 1791203600000,
+  "turns": 6,
+  "pid": 51234,
+  "started": 1791200000000,
+  "status": "idle",
+  "status_since": 1791203600000,
+  "waiting_for": null,
+  "dormant": false,
+  "archived": false,
+  "outcome": "ok"
+}

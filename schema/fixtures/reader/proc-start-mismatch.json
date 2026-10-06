@@ -1,0 +1,42 @@
+{
+  "rule": "A live file whose procStart doesn't match the process start time is dropped (pid reuse).",
+  "config": {
+    "app_dirs": [
+      "{{HOME}}/Library/Application Support/Claude",
+      "{{HOME}}/Library/Application Support/Claude-personal"
+    ]
+  },
+  "dirs": [
+    "Projects/garden"
+  ],
+  "files": {
+    ".claude/sessions/1.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-reused",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "busy",
+      "entrypoint": "cli",
+      "startedAt": 1790000000000,
+      "statusUpdatedAt": 1790000030000,
+      "procStart": "Mon Jan  1 00:00:00 2001"
+    },
+    ".claude/sessions/2.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-match",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "busy",
+      "entrypoint": "cli",
+      "startedAt": 1790000000000,
+      "statusUpdatedAt": 1790000030000,
+      "procStart": "{{PROC_START}}"
+    }
+  },
+  "expect": {
+    "live": {
+      "s-match": {
+        "pid": "{{PID}}"
+      }
+    },
+    "sessions": {}
+  }
+}

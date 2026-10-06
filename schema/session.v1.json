@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/artcar12/ccsession/main/schema/session.v1.json",
+  "title": "Session v1",
+  "description": "One Claude Code session on this machine, live or indexed, as ccsessiond emits it on the local API (/v1) and --stdio. Times are epoch milliseconds (UTC). Unknown keys are allowed so other schemas can extend Session; producers in this repo emit only the keys listed here.",
+  "$ref": "#/$defs/session",
+  "$defs": {
+    "session": {
+      "type": "object",
+      "required": ["id", "kind", "instance", "account", "project", "title", "status", "status_since",
+                   "dormant", "archived", "outcome"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1,
+               "description": "The Claude Code session id (cliSessionId; the transcript's file name)."},
+        "kind": {"enum": ["code", "cowork", "cli"],
+                 "description": "code: desktop-app Code session; cowork: desktop-app Cowork session; cli: no desktop record (terminal, IDE, SDK)."},
+        "entrypoint": {"type": ["string", "null"],
+                       "description": "Live file's entrypoint (claude-desktop, cli, ...). Consumers filter on it."},
+        "instance": {"type": ["string", "null"],
+                     "description": "Desktop data dir name (Claude, Claude-personal). null for cli. Routing keys on this, not on account."},
+        "account": {"type": ["string", "null"],
+                    "description": "Account-id folder under claude-code-sessions. The same id can appear under two instances."},
+        "owner": {
+          "oneOf": [{"$ref": "#/$defs/owner"}, {"type": "null"}],
+          "description": "The desktop instance that owns the session, for open. Required on code and cowork sessions; null for cli."
+        },
+        "host_session_id": {"type": ["string", "null"], "pattern": "^local_",
+                            "description": "Desktop record id (local_...). Live files carry it as hostSessionId."},
+        "project": {"type": ["string", "null"],
+                    "description": "Repo name under the projects root, with .claude/worktrees/<x> folded into its repo."},
+        "project_source": {"enum": ["cwd", "mentions", "none"]},
+        "cwd": {"type": ["string", "null"]},
+        "branch": {"type": ["string", "null"]},
+        "title": {"type": ["string", "null"]},
+        "summary": {"type": ["string", "null"], "description": "Desktop postTurnSummary.status_detail."},
+        "needs_user": {"type": ["boolean", "null"], "description": "Desktop postTurnSummary.needs_user."},
+        "first_prompt": {"type": ["string", "null"], "maxLength": 280},
+        "last_prompt": {"type": ["string", "null"], "maxLength": 280},
+        "last_reply": {"type": ["string", "null"], "maxLength": 280},
+        "prs": {"type": "array", "items": {"$ref": "#/$defs/pr"}},
+        "created": {"$ref": "#/$defs/ms_or_null"},
+        "last": {"$ref": "#/$defs/ms_or_null"},
+        "turns": {"type": "integer", "minimum": 0},
+        "pid": {"type": ["integer", "null"], "minimum": 1, "description": "The claude process, while live."},
+        "started": {"$ref": "#/$defs/ms_or_null", "description": "Live process start (startedAt)."},
+        "status": {
+          "enum": ["waiting", "idle", "busy", "unknown", "error", null],
+          "description": "Live status; null when no live process. error: the newest transcript entry is an API error (cleared by the next successful assistant turn)."
+        },
+        "status_since": {"$ref": "#/$defs/ms_or_null", "description": "When the current status began; null when not live."},
+        "waiting_for": {"type": ["string", "null"], "description": "What a waiting session waits for (permission, ...)."},
+        "dormant": {"type": "boolean", "description": "Has a desktop record but no live process."},
+        "archived": {"type": "boolean", "description": "Desktop record's isArchived."},
+        "outcome": {
+          "enum": ["ok", "error", "interrupted"],
+          "description": "error: the last assistant entry is an API error with no successful turn after it. interrupted: the last user entry is a user interrupt."
+        },
+        "error_kind": {"type": ["string", "null"], "description": "Transcript error field, e.g. rate_limit."},
+        "api_status": {"type": ["integer", "null"], "minimum": 100, "maximum": 599},
+        "resets_at": {"$ref": "#/$defs/ms_or_null", "description": "When a limit resets, if the error names it."}
+      },
+      "allOf": [
+        {
+          "$comment": "not live: no status, pid or status_since",
+          "if": {"properties": {"status": {"const": null}}},
+          "then": {"properties": {"pid": {"type": "null"}, "status_since": {"type": "null"},
+                                  "waiting_for": {"type": "null"}}}
+        },
+        {
+          "$comment": "live and dormant are exclusive",
+          "if": {"properties": {"dormant": {"const": true}}},
+          "then": {"properties": {"status": {"const": null}}}
+        },
+        {
+          "$comment": "desktop sessions carry instance, account and owner",
+          "if": {"properties": {"kind": {"enum": ["code", "cowork"]}}},
+          "then": {"required": ["owner"],
+                   "properties": {"instance": {"type": "string"}, "account": {"type": "string"},
+                                  "owner": {"$ref": "#/$defs/owner"}}},
+          "else": {"properties": {"instance": {"type": "null"}, "account": {"type": "null"},
+                                  "owner": {"type": "null"}, "dormant": {"const": false}}}
+        },
+        {
+          "$comment": "error status names the error",
+          "if": {"properties": {"status": {"const": "error"}}, "required": ["status"]},
+          "then": {"required": ["error_kind", "api_status", "resets_at"]}
+        },
+        {
+          "$comment": "error outcome keeps the error",
+          "if": {"properties": {"outcome": {"const": "error"}}, "required": ["outcome"]},
+          "then": {"required": ["error_kind", "api_status"]}
+        }
+      ]
+    },
+    "owner": {
+      "type": "object",
+      "required": ["data_dir", "pid"],
+      "additionalProperties": false,
+      "properties": {
+        "data_dir": {"type": "string", "minLength": 1,
+                     "description": "Absolute path of the desktop data dir that holds the session's record."},
+        "pid": {"type": ["integer", "null"], "minimum": 1,
+                "description": "That instance's main process, or null when it isn't running."}
+      }
+    },
+    "pr": {
+      "type": "object",
+      "required": ["number"],
+      "properties": {
+        "number": {"type": ["integer", "null"]},
+        "url": {"type": ["string", "null"]},
+        "repo": {"type": ["string", "null"]},
+        "state": {"type": ["string", "null"]},
+        "branch": {"type": ["string", "null"]}
+      }
+    },
+    "live": {
+      "description": "GET /v1/live and the --stdio snapshot: every live session on this machine.",
+      "type": "object",
+      "required": ["machine", "now", "sessions"],
+      "properties": {
+        "machine": {"type": "string"},
+        "now": {"type": "integer"},
+        "sessions": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/session"},
+                                                           {"properties": {"status": {"type": "string"}}}]}}
+      }
+    },
+    "ms_or_null": {"type": ["integer", "null"], "minimum": 0}
+  }
+}

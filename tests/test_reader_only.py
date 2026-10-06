@@ -14,10 +14,11 @@ FORBIDDEN = re.compile(
 def checked_files():
     for name in ("README.md", "pyproject.toml"):
         yield os.path.join(ROOT, name)
-    for dirpath, _, names in os.walk(os.path.join(ROOT, "ccsession")):
-        for n in names:
-            if n.endswith(".py"):
-                yield os.path.join(dirpath, n)
+    for sub, ext in (("ccsession", ".py"), ("schema", ".json")):
+        for dirpath, _, names in os.walk(os.path.join(ROOT, sub)):
+            for n in names:
+                if n.endswith(ext):
+                    yield os.path.join(dirpath, n)
 
 
 class TestReaderOnly(unittest.TestCase):

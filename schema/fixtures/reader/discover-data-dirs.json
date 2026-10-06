@@ -1,0 +1,54 @@
+{
+  "rule": "With app_dirs unset, every Application Support/Claude* dir that has claude-code-sessions is read; others are skipped.",
+  "config": {},
+  "dirs": [
+    "Projects/garden"
+  ],
+  "files": {
+    "Library/Application Support/Claude/claude-code-sessions/0a1b2c3d-0000-4000-8000-000000000001/9e8d7c6b-0000-4000-8000-0000000000f1/local_e1.json": {
+      "sessionId": "local_e1",
+      "cliSessionId": "s-main",
+      "cwd": "{{HOME}}/Projects/garden",
+      "title": "Main",
+      "createdAt": 1790000000000,
+      "lastActivityAt": 1790000060000,
+      "isArchived": false
+    },
+    "Library/Application Support/Claude-personal/claude-code-sessions/0a1b2c3d-0000-4000-8000-000000000002/9e8d7c6b-0000-4000-8000-0000000000f1/local_e2.json": {
+      "sessionId": "local_e2",
+      "cliSessionId": "s-second",
+      "cwd": "{{HOME}}/Projects/garden",
+      "title": "Second",
+      "createdAt": 1790000000000,
+      "lastActivityAt": 1790000060000,
+      "isArchived": false
+    },
+    "Library/Application Support/Claude-old/local-agent-mode-sessions/0a1b2c3d-0000-4000-8000-000000000002/9e8d7c6b-0000-4000-8000-0000000000f1/local_e3.json": {
+      "sessionId": "local_e3",
+      "cliSessionId": "s-old",
+      "title": "No Code sessions dir"
+    },
+    "Library/Application Support/Other/claude-code-sessions/0a1b2c3d-0000-4000-8000-000000000001/9e8d7c6b-0000-4000-8000-0000000000f1/local_e4.json": {
+      "sessionId": "local_e4",
+      "cliSessionId": "s-other",
+      "cwd": "{{HOME}}/Projects/garden",
+      "title": "Not a Claude dir",
+      "createdAt": 1790000000000,
+      "lastActivityAt": 1790000060000,
+      "isArchived": false
+    }
+  },
+  "expect": {
+    "live": {},
+    "sessions": {
+      "s-main": {
+        "instance": "Claude",
+        "title": "Main"
+      },
+      "s-second": {
+        "instance": "Claude-personal",
+        "account": "0a1b2c3d-0000-4000-8000-000000000002"
+      }
+    }
+  }
+}

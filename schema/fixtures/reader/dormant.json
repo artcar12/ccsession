@@ -1,0 +1,151 @@
+{
+  "rule": "A desktop record with no live process is dormant; one with a live process (joined on hostSessionId) is not; a cli session is never dormant.",
+  "config": {
+    "app_dirs": [
+      "{{HOME}}/Library/Application Support/Claude",
+      "{{HOME}}/Library/Application Support/Claude-personal"
+    ]
+  },
+  "dirs": [
+    "Projects/garden"
+  ],
+  "files": {
+    "Library/Application Support/Claude/claude-code-sessions/0a1b2c3d-0000-4000-8000-000000000001/9e8d7c6b-0000-4000-8000-0000000000f1/local_b1.json": {
+      "sessionId": "local_b1",
+      "cliSessionId": "s-running",
+      "cwd": "{{HOME}}/Projects/garden",
+      "title": "Running",
+      "createdAt": 1790000000000,
+      "lastActivityAt": 1790000060000,
+      "isArchived": false
+    },
+    "Library/Application Support/Claude/claude-code-sessions/0a1b2c3d-0000-4000-8000-000000000001/9e8d7c6b-0000-4000-8000-0000000000f1/local_b2.json": {
+      "sessionId": "local_b2",
+      "cliSessionId": "s-asleep",
+      "cwd": "{{HOME}}/Projects/garden",
+      "title": "Asleep",
+      "createdAt": 1790000000000,
+      "lastActivityAt": 1790000060000,
+      "isArchived": false
+    },
+    ".claude/projects/-garden/s-running.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "keep going"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Done."
+            }
+          ]
+        }
+      }
+    ],
+    ".claude/projects/-garden/s-asleep.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "stopped earlier"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Done."
+            }
+          ]
+        }
+      }
+    ],
+    ".claude/projects/-garden/s-cli.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "a terminal session"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Done."
+            }
+          ]
+        }
+      }
+    ],
+    ".claude/sessions/1.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-running",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "idle",
+      "entrypoint": "claude-desktop",
+      "startedAt": 1790000000000,
+      "statusUpdatedAt": 1790000030000,
+      "hostSessionId": "local_b1"
+    }
+  },
+  "expect": {
+    "live": {
+      "s-running": {
+        "kind": "code",
+        "instance": "Claude",
+        "title": "Running",
+        "dormant": false,
+        "status": "idle"
+      }
+    },
+    "sessions": {
+      "s-running": {
+        "dormant": false,
+        "status": "idle",
+        "status_since": 1790000030000,
+        "pid": "{{PID}}"
+      },
+      "s-asleep": {
+        "dormant": true,
+        "status": null,
+        "status_since": null
+      },
+      "s-cli": {
+        "kind": "cli",
+        "dormant": false,
+        "status": null,
+        "instance": null,
+        "account": null
+      }
+    }
+  }
+}
