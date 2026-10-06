@@ -5,4 +5,4 @@ from .reader import (  # noqa: F401
     real_start_utc, same_start, scan_index, scan_transcript, to_ms, transcript_paths,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
