@@ -1,95 +1,60 @@
-#!/usr/bin/env python3
-"""claude-dash collector agent.
+"""Claude Code session reader.
 
-Reads this machine's Claude Code state and turns it into normalized session rows:
+Reads this machine's Claude Code state and turns it into plain session rows:
 
   live      ~/.claude/sessions/<pid>.json        sessions running right now (status, waitingFor)
   index     ~/.claude/projects/*/*.jsonl         every transcript, scanned incrementally by mtime
-  desktop   <app support>/claude-code-sessions   desktop-app index per account (title, summary, PRs)
-  cowork    <app support>/local-agent-mode-sessions
+  desktop   <data dir>/claude-code-sessions      desktop-app index per account (title, summary, PRs)
+  cowork    <data dir>/local-agent-mode-sessions
 
-Rows are classed work/personal by project, and work rows are cut down to an allow-list of
-metadata fields before anything leaves the machine (see WORK_FIELDS).
-
-  ccdash_agent.py --dry-run           print counts of what would be sent
-  ccdash_agent.py --dry-run --json    print the full payload
-  ccdash_agent.py --full              resend every session, not just changed ones
-  ccdash_agent.py                     push changed rows to the server over SSH
+  python3 -m ccsession            print counts of what was read
+  python3 -m ccsession --json     print the live sessions and the index as JSON
 
 Standard library only, so it runs unchanged on macOS and Linux.
 """
 import argparse
 import calendar
 import glob
-import gzip
-import hashlib
 import json
 import os
 import re
-import shlex
-import socket
 import subprocess
 import sys
 import time
 
 HOME = os.path.expanduser("~")
-VERSION = 1
+APP_SUPPORT = os.path.join(HOME, "Library", "Application Support")
 
 DEFAULT_CONFIG = {
-    "machine": None,  # defaults to the short hostname
     "claude_dir": os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude"),
     "projects_root": os.path.join(HOME, "Projects"),
-    # Desktop-app data dirs by account label. Missing dirs (e.g. on Linux) are skipped.
-    "app_dirs": {
-        "work": os.path.join(HOME, "Library/Application Support/Claude"),
-        "personal": os.path.join(HOME, "Library/Application Support/Claude-personal"),
-    },
-    # Account label for sessions with no desktop-index entry (plain CLI runs).
-    "cli_account": "cli",
-    # Class for sessions with no project, by account label. Anything unlisted -> default_class.
-    "account_class": {"work": "work", "personal": "personal"},
-    "default_class": "personal",
-    "work_repos": ["acme-api", "acme-web"],
-    "ticket_regexes": [r"\bACME-\d+\b",
-                       r"\bHOA-\d+\b", r"\bVIS-\d+\b", r"\bDASH-\d+\b"],
-    # First prompts that mark a scripted probe session, not real work.
-    "probe_prefixes": ["Reply with exactly one word", "List every skill or slash command",
-                       "Output only the count of available skills"],
+    # Desktop-app data dirs. None reads every Application Support/Claude* dir that has
+    # claude-code-sessions (see discover_data_dirs).
+    "app_dirs": None,
+    # A session with no repo cwd is attributed to the project its tool calls touched this often.
     "min_path_mentions": 3,
-    "server": {"ssh": None, "command": "ingest", "timeout": 20},
-    "state_dir": os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "ccdash"),
 }
-
-# The only keys a work row may carry off this machine. Prompts, replies and summaries are excluded.
-WORK_FIELDS = {
-    "id", "machine", "account", "class", "class_source", "project", "branch", "tickets", "title",
-    "created", "last", "turns", "archived", "kind", "prs", "host_session_id", "desktop_id",
-}
-WORK_PR_FIELDS = {"number", "url", "repo", "state", "branch"}
-WORK_LIVE_FIELDS = {"id", "machine", "account", "class", "project", "branch", "title", "status",
-                    "waiting_for", "entrypoint", "host_session_id", "pid", "started", "status_updated"}
 
 SNIPPET = 280  # max characters kept from a prompt or reply
 
 
 # ---------------------------------------------------------------- helpers
 
+def config_path():
+    return os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"),
+                        "ccsession", "config.json")
+
+
 def load_config(path=None):
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))
-    path = path or os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"),
-                                "ccdash", "config.json")
+    path = path or config_path()
     if os.path.exists(path):
         with open(path) as f:
-            user = json.load(f)
-        for k, v in user.items():
-            if isinstance(v, dict) and isinstance(cfg.get(k), dict):
-                cfg[k].update(v)
-            else:
-                cfg[k] = v
-    cfg["machine"] = cfg["machine"] or socket.gethostname().split(".")[0]
-    for k in ("claude_dir", "projects_root", "state_dir"):
+            cfg.update(json.load(f))
+    for k in ("claude_dir", "projects_root"):
         cfg[k] = os.path.expanduser(cfg[k])
-    cfg["app_dirs"] = {a: os.path.expanduser(p) for a, p in cfg["app_dirs"].items()}
+    if cfg["app_dirs"] is not None:
+        cfg["app_dirs"] = [os.path.expanduser(p) for p in cfg["app_dirs"]]
     return cfg
 
 
@@ -128,16 +93,6 @@ def project_of(cwd, projects_root):
     return None
 
 
-def find_tickets(texts, regexes):
-    found = []
-    for t in texts:
-        for rx in regexes:
-            for m in re.findall(rx, t or ""):
-                if m not in found:
-                    found.append(m)
-    return found[:12]
-
-
 # ---------------------------------------------------------------- live sessions
 
 def pid_alive(pid):
@@ -173,8 +128,16 @@ def same_start(proc_start, real):
         return False
 
 
+def is_live(pid, proc_start):
+    """The pid is alive and, when the file has a procStart, it matches the process start
+    (a mismatch means the pid was reused). A file with no procStart is kept on the pid alone."""
+    if not pid_alive(pid):
+        return False
+    return not proc_start or same_start(proc_start, real_start_utc(pid))
+
+
 def read_live(sessions_dir, check=True):
-    """Live sessions. check=False skips the pid/procStart test (for fixtures)."""
+    """Live sessions. check=False skips the liveness test (for fixtures)."""
     out = []
     for path in sorted(glob.glob(os.path.join(sessions_dir, "*.json"))):
         try:
@@ -183,7 +146,7 @@ def read_live(sessions_dir, check=True):
         except Exception:
             continue
         pid = d.get("pid")
-        if check and not (pid_alive(pid) and same_start(d.get("procStart"), real_start_utc(pid))):
+        if check and not is_live(pid, d.get("procStart")):
             continue
         wf = d.get("waitingFor")
         out.append({
@@ -201,12 +164,40 @@ def read_live(sessions_dir, check=True):
     return out
 
 
+def join_live(live, desktop, projects_root):
+    """Adds the desktop record (matched on hostSessionId) and the project to each live session."""
+    by_host = {m["desktop_id"]: m for m in desktop.values() if m.get("desktop_id")}
+    for lv in live:
+        meta = by_host.get(lv.get("host_session_id")) or {}
+        lv.update({
+            "instance": meta.get("instance"),
+            "account": meta.get("account"),
+            "kind": meta.get("kind") or "cli",
+            "project": project_of(meta.get("cwd") or lv.get("cwd"), projects_root),
+            "title": meta.get("title") or lv.get("title"),
+        })
+    return live
+
+
 # ---------------------------------------------------------------- desktop index
 
-def read_desktop_index(app_dirs):
-    """cliSessionId -> desktop metadata, for every account's Code and Cowork sessions."""
+def discover_data_dirs(app_support=APP_SUPPORT):
+    """Every Claude* desktop data dir that has claude-code-sessions."""
+    return sorted(d for d in glob.glob(os.path.join(app_support, "Claude*"))
+                  if os.path.isdir(os.path.join(d, "claude-code-sessions")))
+
+
+def data_dirs(cfg):
+    return cfg["app_dirs"] if cfg.get("app_dirs") is not None else discover_data_dirs()
+
+
+def read_desktop_index(dirs):
+    """cliSessionId -> desktop metadata, for every data dir's Code and Cowork sessions.
+    instance is the data dir's name; account is the account-id folder under it. The same
+    account id can appear under two instances."""
     idx = {}
-    for account, base in app_dirs.items():
+    for base in dirs:
+        instance = os.path.basename(base.rstrip("/"))
         for kind, sub in (("code", "claude-code-sessions"), ("cowork", "local-agent-mode-sessions")):
             for f in glob.glob(os.path.join(base, sub, "*", "*", "local_*.json")):
                 try:
@@ -228,7 +219,8 @@ def read_desktop_index(app_dirs):
                         prs.append({"number": p.get("prNumber"), "url": p.get("url"), "repo": p.get("repo"),
                                     "state": p.get("state"), "branch": p.get("branch")})
                 idx[cli] = {
-                    "account": account,
+                    "instance": instance,
+                    "account": os.path.relpath(f, os.path.join(base, sub)).split(os.sep)[0],
                     "kind": kind,
                     "desktop_id": j.get("sessionId"),
                     "cwd": cwd,
@@ -259,7 +251,7 @@ def _text(content):
 
 
 def scan_transcript(path, projects_root):
-    """One pass over a transcript .jsonl. Returns the raw facts; classification happens later."""
+    """One pass over a transcript .jsonl. Returns the raw facts."""
     first = last_user = last_asst = title = None
     cwd = branch = None
     t0 = t1 = None
@@ -322,12 +314,7 @@ def transcript_paths(cfg, desktop):
     return paths
 
 
-# ---------------------------------------------------------------- build rows
-
-def is_probe(text, prefixes):
-    text = (text or "").lstrip()
-    return any(text.startswith(p) for p in prefixes)
-
+# ---------------------------------------------------------------- session rows
 
 def attribute_project(scan, cwd, cfg):
     """(project, source). Direct cwd wins; a session started at the Projects root (or home) is
@@ -345,39 +332,26 @@ def attribute_project(scan, cwd, cfg):
     return None, "none"
 
 
-def classify(project, account, cfg):
-    if project and project in cfg["work_repos"]:
-        return "work", "project"
-    if project:
-        return "personal", "project"
-    return cfg["account_class"].get(account, cfg["default_class"]), "account"
-
-
-def build_row(scan, meta, cfg):
+def build_session(scan, meta, cfg):
+    """One index row from a transcript scan and its desktop record (either may be missing)."""
     meta = meta or {}
-    cwd = meta.get("cwd") or (scan or {}).get("cwd")
-    project, psrc = attribute_project(scan, cwd, cfg)
-    account = meta.get("account") or cfg["cli_account"]
-    cls, csrc = classify(project, account, cfg)
     s = scan or {}
+    cwd = meta.get("cwd") or s.get("cwd")
+    project, psrc = attribute_project(scan, cwd, cfg)
     title = meta.get("title") or s.get("title")
-    branch = s.get("branch") or ((meta.get("branches") or [None])[-1])
-    first = s.get("first_prompt") or meta.get("initial")
-    row = {
+    return {
         "id": s.get("id") or meta.get("cli_id"),
-        "machine": cfg["machine"],
-        "account": account,
+        "instance": meta.get("instance"),
+        "account": meta.get("account"),
         "kind": meta.get("kind") or "cli",
-        "class": cls,
-        "class_source": csrc,
         "project": project,
         "project_source": psrc,
         "cwd": cwd,
-        "branch": branch,
+        "branch": s.get("branch") or ((meta.get("branches") or [None])[-1]),
         "title": clip(title, 120) if title else None,
         "summary": meta.get("summary"),
         "needs_user": meta.get("needs_user"),
-        "first_prompt": clip(first),
+        "first_prompt": clip(s.get("first_prompt") or meta.get("initial")),
         "last_prompt": clip(s.get("last_prompt")),
         "last_reply": clip(s.get("last_reply")),
         "created": meta.get("created") or s.get("created"),
@@ -388,204 +362,81 @@ def build_row(scan, meta, cfg):
         "host_session_id": meta.get("desktop_id"),
         "desktop_id": meta.get("desktop_id"),
     }
-    row["tickets"] = find_tickets([row["title"], row["branch"], first, s.get("last_prompt")],
-                                  cfg["ticket_regexes"])
-    return row
 
 
-def redact(row):
-    """Strip a work row down to WORK_FIELDS. Personal rows pass through, minus local-only keys."""
-    if row.get("class") != "work":
-        return {k: v for k, v in row.items() if not k.startswith("_")}
-    out = {k: v for k, v in row.items() if k in WORK_FIELDS}
-    out["prs"] = [{k: v for k, v in p.items() if k in WORK_PR_FIELDS} for p in row.get("prs") or []]
-    return out
-
-
-def redact_live(row):
-    if row.get("class") != "work":
-        return row
-    return {k: v for k, v in row.items() if k in WORK_LIVE_FIELDS}
-
-
-# ---------------------------------------------------------------- collect
-
-def load_state(cfg):
-    try:
-        with open(os.path.join(cfg["state_dir"], "state.json")) as f:
-            return json.load(f)
-    except Exception:
-        return {"files": {}, "last_hash": None, "last_sent": 0}
-
-
-def save_state(cfg, state):
-    os.makedirs(cfg["state_dir"], exist_ok=True)
-    tmp = os.path.join(cfg["state_dir"], "state.json.tmp")
-    with open(tmp, "w") as f:
-        json.dump(state, f)
-    os.replace(tmp, os.path.join(cfg["state_dir"], "state.json"))
-
-
-def apply_override(row, overrides):
-    cls = (overrides or {}).get(row.get("id"))
-    if cls in ("work", "personal") and cls != row.get("class"):
-        row["class"], row["class_source"] = cls, "override"
-    return row
-
-
-def collect(cfg, state=None, full=False, check_live=True):
-    """Returns (payload, new_file_state, stats). Only sessions whose transcript or desktop-index
-    entry changed since `state` are included unless full=True."""
-    state = state or {"files": {}}
-    overrides = state.get("overrides") or {}
-    # A session whose override changed since the last push is resent so the server gets the
-    # right detail level (re-classed to personal: full row; to work: already stripped server-side).
-    changed = set(overrides) ^ set(state.get("sent_overrides") or {}) | {
-        k for k, v in overrides.items() if (state.get("sent_overrides") or {}).get(k) != v}
-    files_state = {p: sig for p, sig in state["files"].items()
-                   if os.path.splitext(os.path.basename(p))[0].removeprefix("desktop:") not in changed}
-    state = dict(state, files=files_state)
-    desktop = read_desktop_index(cfg["app_dirs"])
-    seen_files = {}
+def scan_index(cfg, files=None, full=False, desktop=None):
+    """Returns (sessions, files, stats). sessions maps id -> row for every transcript or desktop
+    record that changed since `files` (the file signatures a previous call returned), or for all
+    of them when full=True. Pass the returned `files` to the next call."""
+    files = files or {}
+    if desktop is None:
+        desktop = read_desktop_index(data_dirs(cfg))
+    seen = {}
     rows = {}
-    stats = {"transcripts": 0, "scanned": 0, "probes": 0, "desktop": len(desktop)}
+    stats = {"transcripts": 0, "scanned": 0, "desktop": len(desktop)}
 
-    scans = {}
     for p in transcript_paths(cfg, desktop):
         stats["transcripts"] += 1
         try:
             st = os.stat(p)
         except OSError:
             continue
-        sig = [int(st.st_mtime), st.st_size]
-        seen_files[p] = sig
         sid = os.path.splitext(os.path.basename(p))[0]
         meta = desktop.get(sid)
-        meta_sig = int(meta["_mtime"]) if meta else 0
-        prev = state["files"].get(p)
-        if not full and prev == sig + [meta_sig]:
+        sig = [int(st.st_mtime), st.st_size, int(meta["_mtime"]) if meta else 0]
+        seen[p] = sig
+        if not full and files.get(p) == sig:
             continue
-        seen_files[p] = sig + [meta_sig]
-        scans[sid] = scan_transcript(p, cfg["projects_root"])
+        scan = scan_transcript(p, cfg["projects_root"])
         stats["scanned"] += 1
+        if scan.get("turns") or meta:
+            rows[sid] = build_session(scan, meta, cfg)
 
-    for sid, sc in scans.items():
-        meta = desktop.get(sid)
-        if is_probe(sc.get("first_prompt"), cfg["probe_prefixes"]):
-            stats["probes"] += 1
-            continue
-        if not sc.get("turns") and not meta:
-            continue
-        rows[sid] = build_row(sc, meta, cfg)
-
-    # Desktop entries whose transcript is gone still deserve a row (title, dates, summary).
-    have = {os.path.splitext(os.path.basename(p))[0] for p in seen_files}
+    # Desktop records whose transcript is gone still deserve a row (title, dates, summary).
+    have = {os.path.splitext(os.path.basename(p))[0] for p in seen}
     for cli, meta in desktop.items():
         if cli in have:
             continue
         key = "desktop:" + cli
         sig = [int(meta["_mtime"])]
-        seen_files[key] = sig
-        if not full and state["files"].get(key) == sig:
+        seen[key] = sig
+        if not full and files.get(key) == sig:
             continue
-        m = dict(meta, cli_id=cli)
-        rows[cli] = build_row({"id": cli, "mentions": {}, "turns": meta.get("turns") or 0}, m, cfg)
-
-    # Live sessions, enriched with class/project so the dashboard can group them without a join.
-    by_id = {}
-    live = []
-    for lv in read_live(os.path.join(cfg["claude_dir"], "sessions"), check=check_live):
-        meta = desktop.get(lv["id"]) or {}
-        project, _ = attribute_project(None, meta.get("cwd") or lv["cwd"], cfg)
-        account = meta.get("account") or cfg["cli_account"]
-        cls, _ = classify(project, account, cfg)
-        lv.update({"machine": cfg["machine"], "account": account, "class": cls, "project": project,
-                   "title": meta.get("title") or lv["title"]})
-        lv.pop("cwd", None)
-        live.append(redact_live(apply_override(lv, overrides)))
-        by_id[lv["id"]] = lv
-
-    payload = {
-        "v": VERSION,
-        "machine": cfg["machine"],
-        "sent_at": int(time.time() * 1000),
-        "full": full,
-        "live": live,
-        "sessions": [redact(apply_override(r, overrides)) for r in rows.values()],
-    }
-    stats["rows"] = len(payload["sessions"])
-    stats["live"] = len(live)
-    return payload, seen_files, stats
+        rows[cli] = build_session({"id": cli, "mentions": {}, "turns": meta.get("turns") or 0},
+                                  dict(meta, cli_id=cli), cfg)
+    return rows, seen, stats
 
 
-# ---------------------------------------------------------------- push
-
-def push(cfg, payload):
-    target = cfg["server"].get("ssh")
-    if not target:
-        raise RuntimeError("server.ssh is not set in config; use --dry-run")
-    data = gzip.compress(json.dumps(payload, separators=(",", ":")).encode())
-    if target == "local":  # run the server's ingest directly (dev, or the agent on the Linode itself)
-        argv = shlex.split(cfg["server"]["command"])
-    else:
-        argv = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", target, cfg["server"]["command"]]
-    r = subprocess.run(argv, input=data, capture_output=True, timeout=cfg["server"]["timeout"])
-    if r.returncode != 0:
-        raise RuntimeError(f"ingest exited {r.returncode}: {r.stderr.decode(errors='replace').strip()[:300]}")
-    return r.stdout.decode(errors="replace").strip()
+def read_all(cfg, check_live=True):
+    """(live, sessions, stats): a full read of this machine's sessions."""
+    desktop = read_desktop_index(data_dirs(cfg))
+    rows, _, stats = scan_index(cfg, full=True, desktop=desktop)
+    live = join_live(read_live(os.path.join(cfg["claude_dir"], "sessions"), check=check_live),
+                     desktop, cfg["projects_root"])
+    return live, list(rows.values()), stats
 
 
-def summarize(payload, stats):
-    from collections import Counter
-    s = payload["sessions"]
-    print(f"machine {payload['machine']}: {stats['transcripts']} transcripts, {stats['scanned']} scanned, "
-          f"{stats['desktop']} desktop entries, {stats['probes']} probes skipped")
-    print(f"sessions: {len(s)}  live: {len(payload['live'])}")
-    print("  by account:", dict(Counter(r["account"] + "/" + r["kind"] for r in s)))
-    print("  by class:  ", dict(Counter(r["class"] for r in s)))
-    print("  by class source:", dict(Counter(r["class_source"] for r in s)))
-    top = Counter(r["project"] or "(none)" for r in s).most_common(15)
-    print("  top projects:", ", ".join(f"{p} {n}" for p, n in top))
-    for lv in payload["live"]:
-        print(f"  live {lv['status']:8} {lv['class']:8} {lv.get('project') or '-':18} {lv.get('title') or ''}")
-
+# ---------------------------------------------------------------- cli
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config")
-    ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--json", action="store_true", help="with --dry-run, print the payload")
-    ap.add_argument("--full", action="store_true", help="send every session, ignoring the change cursor")
-    ap.add_argument("--heartbeat", type=int, default=60, help="seconds between pushes when nothing changed")
+    ap.add_argument("--json", action="store_true", help="print live sessions and the index as JSON")
     args = ap.parse_args(argv)
     cfg = load_config(args.config)
-    state = load_state(cfg)
-
-    payload, files, stats = collect(cfg, state, full=args.full or args.dry_run)
-    if args.dry_run:
-        if args.json:
-            json.dump(payload, sys.stdout, indent=1)
-            print()
-        else:
-            summarize(payload, stats)
+    live, sessions, stats = read_all(cfg)
+    if args.json:
+        json.dump({"live": live, "sessions": sessions}, sys.stdout, indent=1)
+        print()
         return 0
-
-    digest = hashlib.sha256(json.dumps([payload["live"], payload["sessions"]], sort_keys=True).encode()).hexdigest()
-    now = time.time()
-    if digest == state.get("last_hash") and now - state.get("last_sent", 0) < args.heartbeat:
-        return 0
-    try:
-        reply = push(cfg, payload)
-    except Exception as e:
-        print(f"ccdash: push failed, will retry: {e}", file=sys.stderr)
-        return 3  # same meaning as bin/board: server unreachable; cursor not advanced
-    try:
-        overrides = json.loads(reply.splitlines()[-1]).get("overrides") or {}
-    except (ValueError, IndexError):
-        overrides = state.get("overrides") or {}
-    state.update({"files": files, "last_hash": digest, "last_sent": now,
-                  "sent_overrides": state.get("overrides") or {}, "overrides": overrides})
-    save_state(cfg, state)
+    from collections import Counter
+    print(f"{stats['transcripts']} transcripts, {stats['desktop']} desktop records, "
+          f"{len(sessions)} sessions, {len(live)} live")
+    print("  by instance/kind:", dict(Counter(f"{r['instance'] or '-'}/{r['kind']}" for r in sessions)))
+    top = Counter(r["project"] or "(none)" for r in sessions).most_common(15)
+    print("  top projects:", ", ".join(f"{p} {n}" for p, n in top))
+    for lv in live:
+        print(f"  live {lv['status']:8} {lv.get('project') or '-':18} {lv.get('title') or ''}")
     return 0
 
 
