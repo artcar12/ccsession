@@ -1,6 +1,6 @@
 [project]
 name = "ccsession"
-version = "0.2.0"
+version = "0.3.0"
 description = "Reads this machine's Claude Code sessions: live status, transcripts and the desktop index"
 readme = "README.md"
 license = "MIT"
