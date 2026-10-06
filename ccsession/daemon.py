@@ -4,6 +4,9 @@
   ccsessiond --stdio    the /v1/events stream as JSON lines on stdout, actions as JSON lines on
                         stdin; no port or token; exits when stdin closes
   ccsessiond --once     one /v1/live snapshot on stdout, then exit
+  ccsessiond doctor     a local self-check
+  ccsessiond service install|uninstall|status
+                        run it as a launchd agent (macOS) or systemd user unit (Linux)
 
 The token is in ~/.local/state/ccsession/token (created 0600 on first run). Every request needs
 `Authorization: Bearer <token>` and a Host of 127.0.0.1:<port> or localhost:<port>.
@@ -55,12 +58,15 @@ def state_dir():
     return os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(R.HOME, ".local", "state"), "ccsession")
 
 
-def daemon_config(cfg):
-    """The daemon's own keys in config.json, with defaults."""
+def daemon_config(cfg, claude_open=None):
+    """The daemon's own keys in config.json, with defaults. claude_open (the --claude-open flag, which
+    a program starting ccsessiond as a child passes) wins over the config's."""
+    found = claude_open or cfg.get("claude_open")
     return {
         "port": int(cfg.get("port") or DEFAULT_PORT),
         "machine": cfg.get("machine") or socket.gethostname().split(".")[0],
         "token_file": os.path.expanduser(cfg.get("token_file") or os.path.join(state_dir(), "token")),
+        "claude_open": os.path.expanduser(found) if found else None,
     }
 
 
@@ -689,6 +695,13 @@ def stdio(sessions, stdin=None, stdout=None):
 # ---------------------------------------------------------------- cli
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["doctor"]:
+        from . import doctor
+        return doctor.main(argv[1:])
+    if argv[:1] == ["service"]:
+        from . import service
+        return service.main(argv[1:])
     ap = argparse.ArgumentParser(prog="ccsessiond", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", help="config file (default ~/.config/ccsession/config.json)")

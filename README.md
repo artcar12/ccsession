@@ -18,28 +18,47 @@ record, when a local program asks it to archive or unarchive a session.
 
 Standard library only, Python 3.11 or newer, macOS and Linux (the desktop index is macOS only).
 
-## Run from source
+## Install from source
+
+`ccsessiond` is meant to live at a known path, `~/.local/bin/ccsessiond`, in its own environment.
 
 With [uv](https://docs.astral.sh/uv/) (recommended):
 
 ```bash
-git clone https://github.com/artcar12/ccsession.git
-uv tool install ./ccsession       # puts `ccsession` and `ccsessiond` on your PATH
+uv tool install git+https://github.com/artcar12/ccsession   # @vX.Y.Z pins a release; or: uv tool install ./ccsession
 ccsession                         # counts of what was read
 ccsession --json                  # live sessions and the index as JSON
 ccsessiond --once                 # the live sessions as one Session v1 snapshot
 ```
 
-Without uv:
+`uv tool install --force …` upgrades it in place. Without uv (Python 3.11 or newer):
 
 ```bash
-git clone https://github.com/artcar12/ccsession.git
 python3 -m venv ~/.local/share/ccsession-venv
-~/.local/share/ccsession-venv/bin/pip install ./ccsession
-~/.local/share/ccsession-venv/bin/ccsession
+~/.local/share/ccsession-venv/bin/pip install git+https://github.com/artcar12/ccsession
+mkdir -p ~/.local/bin
+ln -sf ~/.local/share/ccsession-venv/bin/ccsession ~/.local/share/ccsession-venv/bin/ccsessiond ~/.local/bin/
 ```
 
-Or straight from the checkout, with nothing installed: `python3 -m ccsession`, `python3 -m ccsession.daemon`.
+Or straight from a checkout, with nothing installed: `python3 -m ccsession`, `python3 -m ccsession.daemon`.
+
+## Run as a service
+
+```bash
+ccsessiond service install      # launchd agent (macOS) or systemd user unit (Linux), started now and at login
+ccsessiond service status
+ccsessiond service uninstall
+ccsessiond doctor               # self-check; --json for programs
+```
+
+`service install` writes `~/Library/LaunchAgents/com.github.artcar12.ccsessiond.plist` (restarted if it
+crashes) or `~/.config/systemd/user/ccsessiond.service` (`Restart=on-failure`) for the `ccsessiond` you ran
+it from, and starts it. Run it from `~/.local/bin/ccsessiond` so an upgrade keeps the service working.
+Errors go to `~/.local/state/ccsession/ccsessiond.log`. `--dry-run` prints the file instead.
+
+`ccsessiond doctor` checks the config file, the Claude dirs it reads, the token file's mode, the service
+(installed, running, pointing at an existing program), the API (answers with this token and version),
+`claude-open` (macOS), and files that fail to parse. It exits 1 when a check fails.
 
 ## Config
 
@@ -54,6 +73,7 @@ Or straight from the checkout, with nothing installed: `python3 -m ccsession`, `
 | `port` | `8788` | `ccsessiond`'s port on `127.0.0.1` |
 | `machine` | short host name | the `machine` field in snapshots |
 | `token_file` | `~/.local/state/ccsession/token` | `ccsessiond`'s API token (created 0600 on first run) |
+| `claude_open` | unset | path to `claude-open` (from Session Tiles), which delivers opens on macOS; `--claude-open` overrides it |
 
 ## Reader rules
 
@@ -101,6 +121,7 @@ live snapshot) for programs that consume sessions to test against.
 ccsessiond              # local API on 127.0.0.1:8788
 ccsessiond --stdio      # events on stdout, actions on stdin (for a program that starts it as a child)
 ccsessiond --once       # one /v1/live snapshot, then exit
+ccsessiond doctor       # self-check
 ```
 
 It reads `~/.claude/sessions` every 0.5 s (the files are rewritten in place) and the transcripts and
