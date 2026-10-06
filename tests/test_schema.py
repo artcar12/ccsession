@@ -29,9 +29,6 @@ SCHEMA_DIR = os.path.join(os.path.dirname(__file__), "..", "schema")
 FIXTURES = os.path.join(SCHEMA_DIR, "fixtures")
 DEAD_PID = 999999  # above the pid ceiling on macOS and default Linux
 
-# Filled in by ccsessiond (owner resolution, outcome and error detection), not by the reader.
-CCSESSIOND_ONLY = {"owner", "outcome"}
-
 needs_jsonschema = unittest.skipUnless(jsonschema, "jsonschema not installed (uv run installs the dev group)")
 
 
@@ -52,18 +49,6 @@ def closed(s):
     s["$defs"]["pr"]["additionalProperties"] = False
     s["$defs"]["live"]["additionalProperties"] = False
     return s
-
-
-def without_ccsessiond_fields(node):
-    """The schema minus the requirements only ccsessiond can meet, for checking the reader's rows."""
-    if isinstance(node, dict):
-        # "if" blocks are conditions, not requirements: leave them alone.
-        return {k: (sorted(set(v) - CCSESSIOND_ONLY) if k == "required"
-                    else v if k == "if" else without_ccsessiond_fields(v))
-                for k, v in node.items()}
-    if isinstance(node, list):
-        return [without_ccsessiond_fields(v) for v in node]
-    return node
 
 
 def validator(s, ref=None):
@@ -182,7 +167,8 @@ class TestReaderRules(unittest.TestCase):
     def test_cases_cover_the_rules(self):
         names = {os.path.splitext(os.path.basename(p))[0] for p in reader_cases()}
         self.assertEqual(names, {"live-without-proc-start", "proc-start-mismatch", "shared-account-two-instances",
-                                 "dormant", "archived", "cowork", "discover-data-dirs"})
+                                 "dormant", "archived", "cowork", "discover-data-dirs", "api-error",
+                                 "error-cleared", "interrupted"})
 
     def test_cases(self):
         for path in reader_cases():
@@ -197,7 +183,7 @@ class TestReaderRules(unittest.TestCase):
 
     @needs_jsonschema
     def test_reader_rows_validate(self):
-        v = validator(closed(without_ccsessiond_fields(schema())))
+        v = validator(closed(schema()))
         for path in reader_cases():
             with self.subTest(os.path.basename(path)), tempfile.TemporaryDirectory() as home:
                 live, sessions, _ = run_case(fill(path, home), home)

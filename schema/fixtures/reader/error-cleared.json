@@ -1,0 +1,96 @@
+{
+  "rule": "An API error clears on the next successful assistant turn: outcome ok, error fields null, and a live session shows its live status again.",
+  "dirs": [
+    "Projects/garden"
+  ],
+  "files": {
+    ".claude/projects/-garden/s-recovered.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "plan the hedges"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "isApiErrorMessage": true,
+        "error": "rate_limit",
+        "apiErrorStatus": 429,
+        "quotaLimits": {
+          "status": "rejected",
+          "resetsAt": 1790874000,
+          "rateLimitType": "five_hour"
+        },
+        "message": {
+          "role": "assistant",
+          "model": "<synthetic>",
+          "content": [
+            {
+              "type": "text",
+              "text": "You've hit your session limit · resets 5pm"
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:02:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "continue"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:03:00.000Z",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Planned."
+            }
+          ]
+        }
+      }
+    ],
+    ".claude/sessions/1.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-recovered",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "waiting",
+      "entrypoint": "cli",
+      "startedAt": 1790856000000,
+      "statusUpdatedAt": 1790857800000
+    }
+  },
+  "expect": {
+    "live": {
+      "s-recovered": {
+        "status": "waiting",
+        "status_since": 1790857800000,
+        "outcome": "ok",
+        "error_kind": null,
+        "api_status": null,
+        "resets_at": null
+      }
+    },
+    "sessions": {
+      "s-recovered": {
+        "status": "waiting",
+        "outcome": "ok",
+        "error_kind": null,
+        "last_reply": "Planned."
+      }
+    }
+  }
+}

@@ -1,0 +1,190 @@
+{
+  "rule": "A live session whose newest transcript entry is an API error (isApiErrorMessage) has status error with error_kind, api_status and resets_at (quotaLimits.resetsAt) from that entry; its outcome is error. A not-live session whose last assistant entry is an API error has outcome error, even when a user prompt came after it.",
+  "dirs": [
+    "Projects/garden"
+  ],
+  "files": {
+    ".claude/projects/-garden/s-limited.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "tidy the beds"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Tidied."
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:02:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "now the paths"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:03:00.000Z",
+        "isApiErrorMessage": true,
+        "error": "rate_limit",
+        "apiErrorStatus": 429,
+        "quotaLimits": {
+          "status": "rejected",
+          "resetsAt": 1790874000,
+          "rateLimitType": "five_hour"
+        },
+        "message": {
+          "role": "assistant",
+          "model": "<synthetic>",
+          "content": [
+            {
+              "type": "text",
+              "text": "You've hit your session limit · resets 5pm"
+            }
+          ]
+        }
+      }
+    ],
+    ".claude/projects/-garden/s-retried.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "water the lawn"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "isApiErrorMessage": true,
+        "error": "rate_limit",
+        "apiErrorStatus": 429,
+        "quotaLimits": {
+          "status": "rejected",
+          "resetsAt": 1790874000,
+          "rateLimitType": "five_hour"
+        },
+        "message": {
+          "role": "assistant",
+          "model": "<synthetic>",
+          "content": [
+            {
+              "type": "text",
+              "text": "You've hit your session limit · resets 5pm"
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:02:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "try again"
+        }
+      }
+    ],
+    ".claude/projects/-garden/s-overloaded.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "prune the roses"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "isApiErrorMessage": true,
+        "error": "server_error",
+        "apiErrorStatus": 529,
+        "message": {
+          "role": "assistant",
+          "model": "<synthetic>",
+          "content": [
+            {
+              "type": "text",
+              "text": "API Error: 529 Overloaded"
+            }
+          ]
+        }
+      }
+    ],
+    ".claude/sessions/1.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-limited",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "idle",
+      "entrypoint": "cli",
+      "startedAt": 1790856000000,
+      "statusUpdatedAt": 1790857800000
+    }
+  },
+  "expect": {
+    "live": {
+      "s-limited": {
+        "status": "error",
+        "status_since": 1790856180000,
+        "outcome": "error",
+        "error_kind": "rate_limit",
+        "api_status": 429,
+        "resets_at": 1790874000000,
+        "waiting_for": null
+      }
+    },
+    "sessions": {
+      "s-limited": {
+        "status": "error",
+        "outcome": "error",
+        "error_kind": "rate_limit",
+        "api_status": 429,
+        "resets_at": 1790874000000,
+        "last_prompt": "now the paths",
+        "last_reply": "Tidied.",
+        "turns": 2
+      },
+      "s-retried": {
+        "status": null,
+        "outcome": "error",
+        "error_kind": "rate_limit",
+        "api_status": 429,
+        "last_prompt": "try again"
+      },
+      "s-overloaded": {
+        "status": null,
+        "outcome": "error",
+        "error_kind": "server_error",
+        "api_status": 529,
+        "resets_at": null
+      }
+    }
+  }
+}

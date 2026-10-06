@@ -10,7 +10,11 @@ Reads this machine's Claude Code sessions and turns them into plain session rows
 - the **project** for each session: the repo under `~/Projects`, with `.claude/worktrees/<x>` folded
   back into its repo, or the repo its tool calls touched most for sessions started at the root
 
-It only reads. It never writes Claude's files and sends nothing anywhere.
+`ccsessiond` serves the same rows to local programs over HTTP on `127.0.0.1` or over stdin/stdout, and
+keeps them current as sessions change.
+
+It reads, and sends nothing anywhere. The one thing it writes is the `isArchived` flag in a desktop
+record, when a local program asks it to archive or unarchive a session.
 
 Standard library only, Python 3.11 or newer, macOS and Linux (the desktop index is macOS only).
 
@@ -20,9 +24,10 @@ With [uv](https://docs.astral.sh/uv/) (recommended):
 
 ```bash
 git clone https://github.com/artcar12/ccsession.git
-uv tool install ./ccsession       # puts `ccsession` on your PATH
+uv tool install ./ccsession       # puts `ccsession` and `ccsessiond` on your PATH
 ccsession                         # counts of what was read
 ccsession --json                  # live sessions and the index as JSON
+ccsessiond --once                 # the live sessions as one Session v1 snapshot
 ```
 
 Without uv:
@@ -34,7 +39,7 @@ python3 -m venv ~/.local/share/ccsession-venv
 ~/.local/share/ccsession-venv/bin/ccsession
 ```
 
-Or straight from the checkout, with nothing installed: `python3 -m ccsession`.
+Or straight from the checkout, with nothing installed: `python3 -m ccsession`, `python3 -m ccsession.daemon`.
 
 ## Config
 
@@ -46,6 +51,9 @@ Or straight from the checkout, with nothing installed: `python3 -m ccsession`.
 | `projects_root` | `~/Projects` | the folder whose first-level dirs are projects |
 | `app_dirs` | unset | desktop data dirs to read; unset reads every `Application Support/Claude*` dir that has `claude-code-sessions` |
 | `min_path_mentions` | `3` | tool-call mentions needed to attribute a root-level session to a project |
+| `port` | `8788` | `ccsessiond`'s port on `127.0.0.1` |
+| `machine` | short host name | the `machine` field in snapshots |
+| `token_file` | `~/.local/state/ccsession/token` | `ccsessiond`'s API token (created 0600 on first run) |
 
 ## Reader rules
 
@@ -56,7 +64,20 @@ Or straight from the checkout, with nothing installed: `python3 -m ccsession`.
 - Desktop records are matched to live sessions on `hostSessionId` and to transcripts on `cliSessionId`.
 - Cowork sessions are included with `kind: "cowork"`; sessions with no desktop record are `kind: "cli"`.
 - A session with a desktop record and no live process is `dormant`. `scan_index` rows assume nothing is
-  live; `read_all` marks the live ones (`overlay_live`).
+  live; `read_all` marks the live ones (`overlay_live`). A desktop transcript resumed from a terminal
+  (no matching `hostSessionId`) is a separate `cli` live session, and its desktop record stays dormant.
+- **Outcome:** `error` when the last assistant entry is an API error (`isApiErrorMessage`), keeping
+  `error_kind` (its `error`, e.g. `rate_limit`), `api_status` (e.g. `429`) and `resets_at`
+  (`quotaLimits.resetsAt`); a later successful assistant turn clears it. `interrupted` when the last
+  user entry is a user interrupt (`[Request interrupted by user…]`), which doesn't count as a prompt or
+  a turn. Otherwise `ok`.
+- **Error status:** a live session whose newest entry is that API error has `status: "error"` from the
+  error's time, until a newer entry arrives.
+- **Owner:** a desktop session's `owner` is `{data_dir, pid}`: the data dir holding its record, and that
+  instance's main process. For a live session, the ppid chain from its pid (`claude` → `disclaimer` →
+  `Claude`) gives the pid when it reaches the instance holding the record; otherwise the running
+  `Claude` main process started with that `--user-data-dir` (none means `Application Support/Claude`);
+  `null` when that instance isn't running.
 
 Each rule has a case in `schema/fixtures/reader/` that the tests run through the reader.
 
@@ -69,11 +90,64 @@ indexed, with times in epoch milliseconds. It covers status (`waiting`, `idle`, 
 fields (`error_kind`, `api_status`, `resets_at`). `$defs/live` is the live snapshot
 (`{machine, now, sessions}`).
 
-The reader emits everything except `owner`, `outcome` and the error fields, which need the session
-daemon (owner resolution and transcript error detection).
+`read_all` and `ccsessiond` emit rows that validate against it; the tests check both.
 
 `schema/fixtures/sessions/` holds made-up Session v1 examples (desktop, CLI, Cowork, waiting, error, and a
 live snapshot) for programs that consume sessions to test against.
+
+## ccsessiond
+
+```bash
+ccsessiond              # local API on 127.0.0.1:8788
+ccsessiond --stdio      # events on stdout, actions on stdin (for a program that starts it as a child)
+ccsessiond --once       # one /v1/live snapshot, then exit
+```
+
+It reads `~/.claude/sessions` every 0.5 s (the files are rewritten in place) and the transcripts and
+desktop records every 2 s, re-reading only what changed and only the new part of a transcript. The first
+snapshot comes from the live sessions' transcripts and the desktop records; the rest of the index fills
+in behind it.
+
+**HTTP.** Every request needs `Authorization: Bearer <token>` (the token file above) and a `Host` of
+`127.0.0.1:<port>` or `localhost:<port>`; anything else gets a 401 or a 403. There are no CORS headers,
+so browsers can't read it.
+
+| Method & path | Returns / does |
+|---|---|
+| `GET /v1/health` | `ccsession` version, `schema`, `machine`, instances (data dir, running pid, accounts), accounts, reader config, `warnings` (files that failed to parse twice in a row), counts |
+| `GET /v1/live` | `{machine, now, sessions}`: the live sessions (`$defs/live`) |
+| `GET /v1/events` | Server-sent events, below |
+| `GET /v1/sessions` | `{sessions, removed, cursor, reset}`: the index, newest first. Filters: `kind`, `instance`, `account`, `project`, `archived=true\|false`, `since` (ms, on `last`). Pass the returned `cursor` back to get only rows that changed since, and the ids `removed` since; `reset: true` means the cursor was from an earlier run and every row is returned |
+| `GET /v1/sessions/{id}` | one session |
+| `GET /v1/sessions/{id}/transcript?prose=1` | `{id, entries: [{role, text, at}]}`: user prompts and assistant prose, without tool calls, tool results, thinking or API error notices |
+| `POST /v1/sessions/{id}/archive` | `{"archived": true\|false}` sets `isArchived` in the desktop record: the one flag is swapped in place and a complete copy renamed over the file. 409 `not_single_flag` unless the record holds exactly one `isArchived`; 409 `not_desktop` for a `cli` session |
+| `POST /v1/sessions/{id}/open` | 501 for now |
+| `POST /v1/sessions/{id}/message` | 501 (planned) |
+
+**Events.** `/v1/events` and `--stdio` send the same events. The stream covers every live session and
+every desktop (Code and Cowork) session, so dormant and archived ones are included; `cli` sessions that
+aren't live are only in `/v1/sessions`.
+
+| Event | Data |
+|---|---|
+| `snapshot` | `{machine, now, sessions}`, first |
+| `health` | the `/v1/health` body, after the snapshot and whenever it changes |
+| `upsert` | a whole session, new or changed |
+| `status` | `{id, status, status_since, waiting_for}` when only those changed |
+| `remove` | `{id}` |
+
+Over HTTP each is `event: <name>` plus `data: <json>`, with a comment line every 15 s on a quiet
+stream. Over `--stdio` each is one line, `{"event": "<name>", "data": …}`.
+
+**Actions over `--stdio`.** One JSON object per line on stdin, answered by a `result` event:
+
+```
+{"action": "archive", "id": "<session id>", "archived": true, "req": "a1"}
+{"event": "result", "data": {"req": "a1", "action": "archive", "id": "<session id>", "status": 200, "result": {"id": "<session id>", "archived": true}}}
+```
+
+`status` and `result` are what the HTTP route would return. `ccsessiond --stdio` exits when stdin
+closes.
 
 ## As a library
 
@@ -81,7 +155,7 @@ live snapshot) for programs that consume sessions to test against.
 import ccsession
 
 cfg = ccsession.load_config()
-live, sessions, stats = ccsession.read_all(cfg)
+live, sessions, stats = ccsession.read_all(cfg)                # Session v1 rows
 
 rows, files, stats = ccsession.scan_index(cfg)               # first pass
 rows, files, stats = ccsession.scan_index(cfg, files=files)  # only what changed since

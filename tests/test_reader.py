@@ -11,6 +11,8 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import ccsession.reader as R  # noqa: E402
+import ccsession.owner as O  # noqa: E402
+from unittest import mock  # noqa: E402
 
 
 def write(path, obj):
@@ -243,6 +245,98 @@ class TestLive(Fixture):
         g = live["s-garden"]
         self.assertEqual((g["status"], g["kind"], g["instance"]), ("unknown", "cli", None))
         self.assertEqual((g["title"], g["project"]), ("Garden CLI", "garden"))
+
+
+APP = "/Applications/Claude.app/Contents/MacOS/Claude"
+HELPER = "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper"
+
+
+class TestOwner(Fixture):
+    """owner {data_dir, pid} from a made-up process table: work instance 500 (no --user-data-dir,
+    so the default data dir), second instance 600; live s-api (pid 101) runs under 500."""
+
+    def table(self, extra=None):
+        t = {
+            500: (1, APP),
+            501: (500, f"{HELPER} --type=renderer --user-data-dir={self.main_app}"),
+            600: (1, f"{APP} --user-data-dir={self.second_app}"),
+            90: (500, "/Applications/Claude.app/Contents/Helpers/disclaimer --pgroup -- /x/claude"),
+            101: (90, "/x/claude --output-format stream-json"),
+            102: (7, "/usr/local/bin/claude"),
+        }
+        t.update(extra or {})
+        return t
+
+    def read(self, procs):
+        with mock.patch.object(R, "APP_SUPPORT", self.app_support):
+            live, sessions, _ = R.read_all(self.cfg, check_live=False, procs=procs)
+        return {r["id"]: r for r in live}, {r["id"]: r for r in sessions}
+
+    def test_main_data_dir(self):
+        with mock.patch.object(R, "APP_SUPPORT", self.app_support):
+            self.assertEqual(O.main_data_dir(APP), self.main_app)
+            self.assertEqual(O.main_data_dir(f"{APP} --user-data-dir={self.second_app} --foo=1"), self.second_app)
+            self.assertIsNone(O.main_data_dir(f"{HELPER} --type=gpu-process --user-data-dir={self.main_app}"))
+            self.assertIsNone(O.main_data_dir("/usr/local/bin/claude"))
+
+    def test_live_session_walks_the_ppid_chain(self):
+        live, sessions = self.read(self.table())
+        self.assertEqual(live["s-api"]["owner"], {"data_dir": self.main_app, "pid": 500})
+        self.assertEqual(sessions["s-api"]["owner"], {"data_dir": self.main_app, "pid": 500})
+
+    def test_not_live_matched_to_running_instance(self):
+        _, sessions = self.read(self.table())
+        self.assertEqual(sessions["s-gone"]["owner"], {"data_dir": self.main_app, "pid": 500})
+        self.assertEqual(sessions["s-garden"]["owner"], {"data_dir": self.second_app, "pid": 600})
+        self.assertEqual(sessions["s-cowork"]["owner"], {"data_dir": self.second_app, "pid": 600})
+
+    def test_instance_not_running(self):
+        t = self.table()
+        del t[600]
+        _, sessions = self.read(t)
+        self.assertEqual(sessions["s-garden"]["owner"], {"data_dir": self.second_app, "pid": None})
+
+    def test_chain_to_another_instance_falls_back_to_the_record(self):
+        # The chain reaches 600, but the record lives in the work dir: the record wins.
+        live, _ = self.read(self.table({90: (600, "disclaimer")}))
+        self.assertEqual(live["s-api"]["owner"], {"data_dir": self.main_app, "pid": 500})
+
+    def test_cli_sessions_have_no_owner(self):
+        live, sessions = self.read(self.table())
+        self.assertIsNone(sessions["s-chat"]["owner"])
+        # s-garden resumed from a terminal: the live process isn't the desktop session.
+        self.assertIsNone(live["s-garden"]["owner"])
+        self.assertTrue(sessions["s-garden"]["dormant"])
+
+
+class TestTranscriptScan(unittest.TestCase):
+    def test_resumed_read_matches_one_pass(self):
+        """A transcript read in pieces (including a half-written last line) gives the same facts
+        as one pass over the finished file."""
+        cwd = "/tmp/Projects/garden"
+        lines = [json.dumps(e) + "\n" for e in transcript(cwd, "first ask", tool_paths=["/tmp/Projects/garden/a"]) + [
+            {"type": "user", "cwd": cwd, "timestamp": "2026-10-01T12:03:00.000Z",
+             "message": {"role": "user", "content": "second ask"}},
+            {"type": "assistant", "timestamp": "2026-10-01T12:04:00.000Z", "isApiErrorMessage": True,
+             "error": "rate_limit", "apiErrorStatus": 429, "message": {"role": "assistant", "content": "limit"}}]]
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "s-x.jsonl")
+            scan = R.TranscriptScan(path, "/tmp/Projects")
+            text = "".join(lines)
+            cuts = [len(lines[0]) + 10, len(lines[0]) + len(lines[1]) + len(lines[2]), len(text) - 5, len(text)]
+            with open(path, "w") as f:
+                pos = 0
+                for cut in cuts:
+                    f.write(text[pos:cut])
+                    f.flush()
+                    pos = cut
+                    scan.read()
+            self.assertEqual(scan.facts(), R.scan_transcript(path, "/tmp/Projects"))
+            self.assertEqual((scan.facts()["turns"], scan.facts()["outcome"]), (2, "error"))
+            self.assertFalse(scan.stale(os.stat(path)))
+            with open(path, "w") as f:
+                f.write(lines[0])
+            self.assertTrue(scan.stale(os.stat(path)))
 
 
 if __name__ == "__main__":

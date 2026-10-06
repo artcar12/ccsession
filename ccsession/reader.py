@@ -136,17 +136,20 @@ def is_live(pid, proc_start):
     return not proc_start or same_start(proc_start, real_start_utc(pid))
 
 
-def read_live(sessions_dir, check=True):
-    """Live sessions. check=False skips the liveness test (for fixtures)."""
+def read_live(sessions_dir, check=True, failures=None, alive=is_live):
+    """Live sessions. check=False skips the liveness test (for fixtures); alive(pid, procStart) is
+    the test. Files that fail to parse are appended to failures when a list is given."""
     out = []
     for path in sorted(glob.glob(os.path.join(sessions_dir, "*.json"))):
         try:
             with open(path) as f:
                 d = json.load(f)
         except Exception:
+            if failures is not None:
+                failures.append(path)
             continue
         pid = d.get("pid")
-        if check and not is_live(pid, d.get("procStart")):
+        if check and not alive(pid, d.get("procStart")):
             continue
         wf = d.get("waitingFor")
         out.append({
@@ -173,23 +176,68 @@ def join_live(live, desktop, projects_root):
             "instance": meta.get("instance"),
             "account": meta.get("account"),
             "kind": meta.get("kind") or "cli",
+            "owner": owner_of(meta),
             "project": project_of(meta.get("cwd") or lv.get("cwd"), projects_root),
             "title": meta.get("title") or lv.get("title"),
             "archived": meta.get("archived", False),
             "dormant": False,
+            # A live session with no index row yet (no turns) has nothing to report.
+            "outcome": "ok", "error_kind": None, "api_status": None, "resets_at": None,
         })
     return live
 
 
+LIVE_KEYS = ("status", "status_since", "waiting_for", "pid", "started", "entrypoint")
+
+
+def _lay_over(row, lv):
+    row.update({k: lv.get(k) for k in LIVE_KEYS})
+    row["title"] = lv.get("title") or row.get("title")
+    row["dormant"] = False
+    if row.get("_error_newest"):
+        row.update(status="error", status_since=row.get("_error_at") or lv.get("status_since"), waiting_for=None)
+    return row
+
+
+def _same_session(row, lv):
+    """A live process is the index row's session unless the row is a desktop record the process
+    isn't running under (a desktop transcript resumed from a terminal has its own process)."""
+    return row.get("kind") == "cli" or row.get("host_session_id") == lv.get("host_session_id")
+
+
 def overlay_live(rows, live):
-    """Marks the index rows that have a live process: their live status, and not dormant."""
+    """Marks the index rows that have a live process: their live status, and not dormant. A live
+    session whose newest transcript entry is an API error has status error from that entry on."""
     for lv in live:
         row = rows.get(lv.get("id"))
-        if row:
-            row.update({k: lv.get(k) for k in ("status", "status_since", "waiting_for", "pid", "started",
-                                               "entrypoint")})
-            row["dormant"] = False
+        if row and _same_session(row, lv):
+            _lay_over(row, lv)
     return rows
+
+
+def live_rows(rows, live):
+    """Full rows for the live sessions: the index row with the live status laid over it (see
+    overlay_live), or the live row itself when the session has no index row yet. A desktop
+    transcript resumed outside the desktop app keeps the transcript's facts but not the record's."""
+    overlay_live(rows, live)
+    out = []
+    for lv in live:
+        row = rows.get(lv.get("id"))
+        if not row:
+            out.append(lv)
+        elif _same_session(row, lv):
+            out.append(row)
+        else:
+            r = dict(row, summary=None, needs_user=None, prs=[], _record=None)
+            r.update({k: lv.get(k) for k in ("kind", "instance", "account", "owner", "host_session_id",
+                                             "project", "archived")})
+            out.append(_lay_over(r, lv))
+    return out
+
+
+def public(row):
+    """A row without the reader's private keys (those starting with _)."""
+    return {k: v for k, v in row.items() if not k.startswith("_")}
 
 
 # ---------------------------------------------------------------- desktop index
@@ -204,22 +252,46 @@ def data_dirs(cfg):
     return cfg["app_dirs"] if cfg.get("app_dirs") is not None else discover_data_dirs()
 
 
-def read_desktop_index(dirs):
+def owner_of(meta):
+    """The owner a desktop record implies before any process is looked at: its data dir, pid
+    unknown (see ccsession.owner). None for a session with no desktop record."""
+    return {"data_dir": meta["_data_dir"], "pid": None} if meta.get("_data_dir") else None
+
+
+def read_desktop_index(dirs, failures=None, cache=None):
     """cliSessionId -> desktop metadata, for every data dir's Code and Cowork sessions.
     instance is the data dir's name; account is the account-id folder under it. The same
-    account id can appear under two instances."""
+    account id can appear under two instances. Records that fail to parse are appended to
+    failures when a list is given. cache (a dict kept between calls) skips re-reading records
+    whose mtime and size are unchanged."""
     idx = {}
     for base in dirs:
-        instance = os.path.basename(base.rstrip("/"))
+        base = os.path.normpath(base)
+        instance = os.path.basename(base)
         for kind, sub in (("code", "claude-code-sessions"), ("cowork", "local-agent-mode-sessions")):
             for f in glob.glob(os.path.join(base, sub, "*", "*", "local_*.json")):
+                if cache is not None:
+                    try:
+                        st = os.stat(f)
+                    except OSError:
+                        continue
+                    sig = (st.st_mtime, st.st_size)
+                    hit = cache.get(f)
+                    if hit and hit[0] == sig:
+                        if hit[1]:
+                            idx[hit[1][0]] = hit[1][1]
+                        continue
                 try:
                     with open(f) as fh:
                         j = json.load(fh)
                 except Exception:
+                    if failures is not None:
+                        failures.append(f)
                     continue
                 cli = j.get("cliSessionId")
                 if not cli:
+                    if cache is not None:
+                        cache[f] = (sig, None)
                     continue
                 pts = j.get("postTurnSummary")
                 cwd = j.get("originCwd") or j.get("cwd")
@@ -249,7 +321,11 @@ def read_desktop_index(dirs):
                     "initial": j.get("initialMessage"),
                     "_mtime": os.path.getmtime(f),
                     "_cowork_dir": os.path.splitext(f)[0] if kind == "cowork" else None,
+                    "_data_dir": base,
+                    "_path": f,
                 }
+                if cache is not None:
+                    cache[f] = (sig, (cli, idx[cli]))
     return idx
 
 
@@ -263,60 +339,135 @@ def _text(content):
     return ""
 
 
+INTERRUPTED = "[Request interrupted by user"  # also "... for tool use]"
+
+
+def api_error(e):
+    """The error facts of an API error entry (isApiErrorMessage), else None. resets_at comes from
+    quotaLimits.resetsAt (epoch seconds) when the error names one."""
+    if not e.get("isApiErrorMessage"):
+        return None
+    quota = e.get("quotaLimits") if isinstance(e.get("quotaLimits"), dict) else {}
+    resets = quota.get("resetsAt")
+    status = e.get("apiErrorStatus")
+    return {"error_kind": e.get("error") if isinstance(e.get("error"), str) else None,
+            "api_status": status if isinstance(status, int) and 100 <= status <= 599 else None,
+            "resets_at": int(resets * 1000) if isinstance(resets, (int, float)) and resets > 0 else None,
+            "at": iso_ms(e.get("timestamp"))}
+
+
+def outcome_of(err, err_at, interrupt_at, newest_at):
+    """(outcome, error facts or None, error is the newest entry). err is the last assistant entry's
+    API error (None when that entry succeeded); err_at, interrupt_at and newest_at are main-thread
+    positions: of that entry, of the last user entry when it was an interrupt, of the newest user or
+    assistant entry."""
+    if err and (interrupt_at is None or err_at > interrupt_at):
+        return "error", err, err_at == newest_at
+    if interrupt_at is not None:
+        return "interrupted", None, False
+    return "ok", None, False
+
+
+class TranscriptScan:
+    """A resumable pass over one transcript .jsonl: read() picks up where the last read stopped, so a
+    growing transcript is not re-read from the start. A partial last line is left for the next read
+    unless final=True."""
+
+    def __init__(self, path, projects_root):
+        self.path = path
+        self.root_rx = re.compile(re.escape(projects_root.rstrip("/")) + r"/([A-Za-z0-9._-]+)")
+        self.offset = self.n = 0
+        self.ino = None
+        self.first = self.last_user = self.last_asst = self.title = None
+        self.cwd = self.branch = None
+        self.t0 = self.t1 = None
+        self.turns = 0
+        self.mentions = {}
+        # main-thread positions for the outcome: see outcome_of
+        self.err = self.err_at = self.interrupt_at = self.newest_at = None
+
+    def stale(self, st):
+        """The file was replaced or truncated since the last read: start over."""
+        return self.ino is not None and (st.st_ino != self.ino or st.st_size < self.offset)
+
+    def read(self, final=False):
+        with open(self.path, "rb") as f:
+            self.ino = os.fstat(f.fileno()).st_ino
+            f.seek(self.offset)
+            for raw in f:
+                if not raw.endswith(b"\n") and not final:
+                    break
+                self.offset += len(raw)
+                self.feed(raw.decode("utf-8", "replace"))
+        return self
+
+    def feed(self, line):
+        n = self.n
+        self.n += 1
+        try:
+            e = json.loads(line)
+        except ValueError:
+            return
+        if not isinstance(e, dict):
+            return
+        t = e.get("type")
+        if t == "custom-title":
+            self.title = e.get("customTitle") or self.title
+        elif t == "ai-title" and not self.title:
+            self.title = e.get("aiTitle")
+        elif t == "summary" and not self.title:
+            self.title = e.get("summary")
+        ts = e.get("timestamp")
+        if ts:
+            self.t0 = self.t0 or ts
+            self.t1 = ts
+        self.cwd = self.cwd or e.get("cwd")
+        gb = e.get("gitBranch")
+        if gb and gb != "HEAD":
+            self.branch = gb
+        if e.get("isSidechain") or e.get("isMeta"):
+            return
+        msg = e.get("message") or {}
+        if t == "user":
+            self.newest_at = n
+            txt = _text(msg.get("content")).strip()
+            if txt.startswith(INTERRUPTED):
+                self.interrupt_at = n
+            elif txt and not txt.startswith("<"):
+                self.turns += 1
+                self.first = self.first or txt
+                self.last_user = txt
+                self.interrupt_at = None
+        elif t == "assistant":
+            self.newest_at = n
+            self.err, self.err_at = api_error(e), n
+            if self.err:
+                return
+            content = msg.get("content")
+            txt = _text(content).strip()
+            if txt:
+                self.last_asst = txt
+            if isinstance(content, list):
+                for b in content:
+                    if isinstance(b, dict) and b.get("type") == "tool_use":
+                        for hit in self.root_rx.findall(json.dumps(b.get("input", {}))):
+                            self.mentions[hit] = self.mentions.get(hit, 0) + 1
+
+    def facts(self):
+        outcome, error, error_newest = outcome_of(self.err, self.err_at, self.interrupt_at, self.newest_at)
+        return {
+            "id": os.path.splitext(os.path.basename(self.path))[0],
+            "cwd": self.cwd, "branch": self.branch, "title": self.title,
+            "first_prompt": self.first, "last_prompt": self.last_user, "last_reply": self.last_asst,
+            "created": iso_ms(self.t0), "last": iso_ms(self.t1), "turns": self.turns,
+            "mentions": dict(self.mentions),
+            "outcome": outcome, "error": error, "error_newest": error_newest,
+        }
+
+
 def scan_transcript(path, projects_root):
     """One pass over a transcript .jsonl. Returns the raw facts."""
-    first = last_user = last_asst = title = None
-    cwd = branch = None
-    t0 = t1 = None
-    turns = 0
-    mentions = {}
-    root_rx = re.compile(re.escape(projects_root.rstrip("/")) + r"/([A-Za-z0-9._-]+)")
-    with open(path, errors="replace") as f:
-        for line in f:
-            try:
-                e = json.loads(line)
-            except ValueError:
-                continue
-            t = e.get("type")
-            if t == "custom-title":
-                title = e.get("customTitle") or title
-            elif t == "ai-title" and not title:
-                title = e.get("aiTitle")
-            elif t == "summary" and not title:
-                title = e.get("summary")
-            ts = e.get("timestamp")
-            if ts:
-                t0 = t0 or ts
-                t1 = ts
-            cwd = cwd or e.get("cwd")
-            gb = e.get("gitBranch")
-            if gb and gb != "HEAD":
-                branch = gb
-            if e.get("isSidechain") or e.get("isMeta"):
-                continue
-            msg = e.get("message") or {}
-            if t == "user":
-                txt = _text(msg.get("content")).strip()
-                if txt and not txt.startswith("<"):
-                    turns += 1
-                    first = first or txt
-                    last_user = txt
-            elif t == "assistant":
-                content = msg.get("content")
-                txt = _text(content).strip()
-                if txt:
-                    last_asst = txt
-                if isinstance(content, list):
-                    for b in content:
-                        if isinstance(b, dict) and b.get("type") == "tool_use":
-                            for hit in root_rx.findall(json.dumps(b.get("input", {}))):
-                                mentions[hit] = mentions.get(hit, 0) + 1
-    return {
-        "id": os.path.splitext(os.path.basename(path))[0],
-        "cwd": cwd, "branch": branch, "title": title,
-        "first_prompt": first, "last_prompt": last_user, "last_reply": last_asst,
-        "created": iso_ms(t0), "last": iso_ms(t1), "turns": turns, "mentions": mentions,
-    }
+    return TranscriptScan(path, projects_root).read(final=True).facts()
 
 
 def transcript_paths(cfg, desktop):
@@ -352,6 +503,7 @@ def build_session(scan, meta, cfg):
     cwd = meta.get("cwd") or s.get("cwd")
     project, psrc = attribute_project(scan, cwd, cfg)
     title = meta.get("title") or s.get("title")
+    err = s.get("error") or {}
     return {
         "id": s.get("id") or meta.get("cli_id"),
         "instance": meta.get("instance"),
@@ -373,17 +525,30 @@ def build_session(scan, meta, cfg):
         "archived": meta.get("archived", False),
         "prs": meta.get("prs") or [],
         "host_session_id": meta.get("desktop_id"),
+        "owner": owner_of(meta),
         # Index rows assume no live process; overlay_live marks the live ones.
         "status": None,
         "status_since": None,
         "dormant": bool(meta.get("kind")),
+        "outcome": s.get("outcome") or "ok",
+        "error_kind": err.get("error_kind"),
+        "api_status": err.get("api_status"),
+        "resets_at": err.get("resets_at"),
+        # Private (public() drops them): what overlay_live, archive and the transcript route need.
+        "_error_newest": bool(s.get("error_newest")),
+        "_error_at": err.get("at"),
+        "_transcript": s.get("_path"),
+        "_record": meta.get("_path"),
     }
 
 
-def scan_index(cfg, files=None, full=False, desktop=None):
+def scan_index(cfg, files=None, full=False, desktop=None, scans=None, only=None):
     """Returns (sessions, files, stats). sessions maps id -> row for every transcript or desktop
     record that changed since `files` (the file signatures a previous call returned), or for all
-    of them when full=True. Pass the returned `files` to the next call."""
+    of them when full=True. Pass the returned `files` to the next call. scans (a dict kept between
+    calls) holds a TranscriptScan per transcript, so a changed transcript is read from where the
+    last call stopped. only (a set of session ids) skips every other transcript, leaving it out of
+    the returned files so the next call reads it."""
     files = files or {}
     if desktop is None:
         desktop = read_desktop_index(data_dirs(cfg))
@@ -392,6 +557,8 @@ def scan_index(cfg, files=None, full=False, desktop=None):
     stats = {"transcripts": 0, "scanned": 0, "desktop": len(desktop)}
 
     for p in transcript_paths(cfg, desktop):
+        if only is not None and os.path.splitext(os.path.basename(p))[0] not in only:
+            continue
         stats["transcripts"] += 1
         try:
             st = os.stat(p)
@@ -399,11 +566,21 @@ def scan_index(cfg, files=None, full=False, desktop=None):
             continue
         sid = os.path.splitext(os.path.basename(p))[0]
         meta = desktop.get(sid)
-        sig = [int(st.st_mtime), st.st_size, int(meta["_mtime"]) if meta else 0]
+        sig = [int(st.st_mtime), st.st_size, meta["_mtime"] if meta else 0]
         seen[p] = sig
         if not full and files.get(p) == sig:
             continue
-        scan = scan_transcript(p, cfg["projects_root"])
+        if scans is None:
+            scan = scan_transcript(p, cfg["projects_root"])
+        else:
+            ts = scans.get(p)
+            if ts is None or ts.stale(st):
+                ts = scans[p] = TranscriptScan(p, cfg["projects_root"])
+            try:
+                scan = ts.read().facts()
+            except OSError:
+                continue
+        scan["_path"] = p
         stats["scanned"] += 1
         if scan.get("turns") or meta:
             rows[sid] = build_session(scan, meta, cfg)
@@ -414,7 +591,7 @@ def scan_index(cfg, files=None, full=False, desktop=None):
         if cli in have:
             continue
         key = "desktop:" + cli
-        sig = [int(meta["_mtime"])]
+        sig = [meta["_mtime"]]
         seen[key] = sig
         if not full and files.get(key) == sig:
             continue
@@ -423,13 +600,16 @@ def scan_index(cfg, files=None, full=False, desktop=None):
     return rows, seen, stats
 
 
-def read_all(cfg, check_live=True):
-    """(live, sessions, stats): a full read of this machine's sessions."""
+def read_all(cfg, check_live=True, procs=None):
+    """(live, sessions, stats): a full read of this machine's sessions, as Session v1 rows. procs
+    is a process table for owner resolution (ccsession.owner.process_table() when None)."""
+    from . import owner
     desktop = read_desktop_index(data_dirs(cfg))
     rows, _, stats = scan_index(cfg, full=True, desktop=desktop)
-    live = join_live(read_live(os.path.join(cfg["claude_dir"], "sessions"), check=check_live),
-                     desktop, cfg["projects_root"])
-    return live, list(overlay_live(rows, live).values()), stats
+    live = live_rows(rows, join_live(read_live(os.path.join(cfg["claude_dir"], "sessions"), check=check_live),
+                                     desktop, cfg["projects_root"]))
+    owner.resolve(list(rows.values()) + live, owner.process_table() if procs is None else procs)
+    return [public(r) for r in live], [public(r) for r in rows.values()], stats
 
 
 # ---------------------------------------------------------------- cli
