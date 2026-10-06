@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
@@ -38,6 +39,48 @@ def write(path, obj):
 def entry(kind, minute, content, cwd, **kw):
     return dict({"type": kind, "cwd": cwd, "gitBranch": "main", "timestamp": "2026-10-01T12:%02d:00.000Z" % minute,
                  "message": {"role": kind, "content": content}}, **kw)
+
+
+STUB = """#!{python}
+# A stand-in for Session Tiles' claude-open: records its arguments, answers as the real one does.
+# The exit code (or "sleep") comes from the file "mode" next to it.
+import json, os, sys, time
+here = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(here, "calls"), "a") as f:
+    f.write(json.dumps(sys.argv[1:]) + "\\n")
+path = os.path.join(here, "mode")
+mode = open(path).read().strip() if os.path.exists(path) else "0"
+if mode == "sleep":
+    time.sleep(10)
+args = dict(zip(sys.argv[1::2], sys.argv[2::2]))
+code = int(mode)
+if code == 0:
+    print(json.dumps({{"instance": os.path.basename(args["--data-dir"]), "dataDir": args["--data-dir"],
+                      "pid": int(args.get("--pid", 4321)), "delivered": True, "launched": "--pid" not in args,
+                      "elapsedMs": 3}}))
+else:
+    print(json.dumps({{"error": "stub failure %d" % code, "code": code}}))
+sys.exit(code)
+"""
+
+
+class StubClaudeOpen:
+    def __init__(self, base):
+        self.dir = os.path.join(base, "stub")
+        os.makedirs(self.dir)
+        self.path = os.path.join(self.dir, "claude-open")
+        write(self.path, STUB.format(python=sys.executable))
+        os.chmod(self.path, 0o755)
+
+    def set(self, mode):
+        write(os.path.join(self.dir, "mode"), str(mode))
+
+    def calls(self):
+        path = os.path.join(self.dir, "calls")
+        if not os.path.exists(path):
+            return []
+        with open(path) as f:
+            return [json.loads(line) for line in f]
 
 
 class Home:
@@ -180,6 +223,78 @@ class TestArchive(unittest.TestCase):
                 self.assertEqual(cm.exception.error, "not_single_flag")
                 with open(path) as f:
                     self.assertEqual(f.read(), text)
+
+
+class TestOpen(DaemonCase):
+    def setUp(self):
+        super().setUp()
+        self.stub = StubClaudeOpen(self.tmp.name)
+        self.procs = {}
+        self.sessions = D.Sessions(self.home.cfg, "test-mac", procs=lambda: self.procs, claude_open=self.stub.path,
+                                   platform="darwin")
+        self.sessions.refresh(force_index=True)
+        self.link = "claude://claude.ai/epitaxy/local_live"
+
+    def running(self, pid=500):
+        self.procs = {pid: (1, "/Applications/Claude.app/Contents/MacOS/Claude --user-data-dir=" + self.home.data_dir)}
+
+    def test_delivers_to_the_running_owner(self):
+        self.running()
+        status, body = self.sessions.act("open", "s-live", {})
+        self.assertEqual((status, body), (200, {"id": "s-live", "instance": "Claude", "data_dir": self.home.data_dir,
+                                                "pid": 500, "delivered": True, "launched": False}))
+        self.assertEqual(self.stub.calls(), [["--data-dir", self.home.data_dir, "--pid", "500", "--url", self.link]])
+
+    def test_owner_not_running_is_launched(self):
+        status, body = self.sessions.act("open", "s-old", {})  # dormant (and archived) desktop session
+        self.assertEqual((status, body["launched"], body["pid"]), (200, True, 4321))
+        self.assertEqual(self.stub.calls(), [["--data-dir", self.home.data_dir, "--url",
+                                              "claude://claude.ai/epitaxy/local_old"]])
+
+    def test_owner_is_resolved_when_opening(self):
+        self.sessions.act("open", "s-live", {})
+        self.running(501)  # the instance started after the last process-table read
+        self.sessions.act("open", "s-live", {})
+        self.assertEqual([c[:4] for c in self.stub.calls()],
+                         [["--data-dir", self.home.data_dir, "--url", self.link],
+                          ["--data-dir", self.home.data_dir, "--pid", "501"]])
+
+    def test_claude_open_failures(self):
+        for code, status, error in ((2, 500, "claude_open_usage"), (3, 409, "not_openable"),
+                                    (4, 403, "consent_denied"), (5, 504, "launch_failed"), (6, 502, "send_failed"),
+                                    (9, 500, "claude_open_failed")):
+            self.stub.set(code)
+            self.assertEqual(self.sessions.act("open", "s-live", {}),
+                             (status, {"error": error, "detail": f"stub failure {code}"}))
+
+    def test_timeout(self):
+        self.stub.set("sleep")
+        timeout, D.OPEN_TIMEOUT = D.OPEN_TIMEOUT, 0.5
+        try:
+            self.assertEqual(self.sessions.act("open", "s-live", {})[:1], (504,))
+        finally:
+            D.OPEN_TIMEOUT = timeout
+
+    def test_not_openable(self):
+        self.assertEqual(self.sessions.act("open", "s-cli", {})[0], 409)
+        self.assertEqual(self.sessions.act("open", "nope", {})[0], 404)
+        cowork = dict(self.sessions.get("s-live"), kind="cowork")  # no deep link for Cowork is known
+        with mock.patch.object(self.sessions, "get", return_value=cowork):
+            self.assertEqual(self.sessions.act("open", "s-live", {})[0], 409)
+        self.sessions.platform = "linux"
+        self.assertEqual(self.sessions.act("open", "s-live", {}), (409, {
+            "error": "not_openable", "detail": "opening needs the Claude desktop app (macOS)"}))
+        self.assertEqual(self.stub.calls(), [])
+
+    def test_claude_open_missing(self):
+        for path in (None, os.path.join(self.tmp.name, "nope")):
+            self.sessions.claude_open = path
+            self.assertEqual(self.sessions.act("open", "s-live", {})[1]["error"], "claude_open_missing")
+
+    def test_flag_wins_over_config(self):
+        self.assertEqual(D.daemon_config({"claude_open": "~/a"})["claude_open"], os.path.expanduser("~/a"))
+        self.assertEqual(D.daemon_config({"claude_open": "~/a"}, "/b")["claude_open"], "/b")
+        self.assertIsNone(D.daemon_config({})["claude_open"])
 
 
 class TestHTTP(DaemonCase):
@@ -343,8 +458,17 @@ class TestHTTP(DaemonCase):
         self.assertEqual(self.request("POST", "/v1/sessions/nope/archive", {"archived": True})[0], 404)
         self.assertEqual(self.request("POST", "/v1/sessions/s-live/archive", {"archived": "yes"})[0], 400)
 
-    def test_open_and_message_not_implemented(self):
-        self.assertEqual(self.request("POST", "/v1/sessions/s-live/open", {})[0], 501)
+    def test_open(self):
+        stub = StubClaudeOpen(self.tmp.name)
+        self.sessions.claude_open, self.sessions.platform = stub.path, "darwin"
+        status, _, body = self.request("POST", "/v1/sessions/s-live/open", {})
+        self.assertEqual((status, body["instance"], body["delivered"]), (200, "Claude", True))
+        stub.set(4)
+        status, _, body = self.request("POST", "/v1/sessions/s-live/open", {})
+        self.assertEqual((status, body["error"]), (403, "consent_denied"))
+        self.assertEqual(self.request("POST", "/v1/sessions/s-cli/open", {})[0], 409)
+
+    def test_message_not_implemented(self):
         self.assertEqual(self.request("POST", "/v1/sessions/s-live/message", {"text": "hi"})[0], 501)
 
     def test_sse_status_within_2s(self):
@@ -400,7 +524,9 @@ class TestCommandLine(unittest.TestCase):
             self.assertEqual([e.message for e in validator(closed(schema()), "live").iter_errors(snap)], [])
 
     def test_stdio(self):
-        p = subprocess.Popen([sys.executable, "-m", "ccsession.daemon", "--stdio", "--config", self.home.config_file()],
+        stub = StubClaudeOpen(self.tmp.name)
+        p = subprocess.Popen([sys.executable, "-m", "ccsession.daemon", "--stdio", "--config", self.home.config_file(),
+                              "--claude-open", stub.path],
                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                              env=self.env)
         try:
@@ -428,7 +554,12 @@ class TestCommandLine(unittest.TestCase):
                 r = read_until("result")
                 results[r["req"]] = r
             self.assertEqual((results["r1"]["status"], results["r1"]["result"]), (200, {"id": "s-live", "archived": True}))
-            self.assertEqual((results[None]["status"], results["r2"]["status"]), (400, 501))
+            self.assertEqual(results[None]["status"], 400)
+            if sys.platform == "darwin":
+                self.assertEqual((results["r2"]["status"], results["r2"]["result"]["delivered"]), (200, True))
+                self.assertEqual(stub.calls()[0][-2:], ["--url", "claude://claude.ai/epitaxy/local_live"])
+            else:
+                self.assertEqual(results["r2"]["status"], 409)
             with open(self.home.records["s-live"]) as f:
                 self.assertTrue(json.load(f)["isArchived"])
             t0 = time.monotonic()

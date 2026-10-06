@@ -18,7 +18,8 @@ The token is in ~/.local/state/ccsession/token (created 0600 on first run). Ever
   GET  /v1/sessions/{id}
   GET  /v1/sessions/{id}/transcript?prose=1
   POST /v1/sessions/{id}/archive           {"archived": true|false}
-  POST /v1/sessions/{id}/open              not implemented yet (501)
+  POST /v1/sessions/{id}/open              open it in the desktop instance that owns it (macOS),
+                                           through claude-open: {instance, data_dir, pid, delivered, launched}
   POST /v1/sessions/{id}/message           V2 (501)
 
 Standard library only.
@@ -32,6 +33,7 @@ import queue
 import re
 import secrets
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -49,6 +51,16 @@ PROCS_POLL = 10.0   # s between process-table reads when the live set hasn't cha
 KEEPALIVE = 15.0    # s between SSE comments on an idle stream
 MAX_BODY = 64 * 1024
 MAX_BACKLOG = 5000  # queued events before a stalled listener is dropped
+OPEN_TIMEOUT = 60.0  # s for claude-open: an Automation consent prompt or a cold start of the account
+DEEP_LINK = "claude://claude.ai/epitaxy/{}"
+# claude-open's exit codes -> (HTTP status, error)
+OPEN_ERRORS = {
+    2: (500, "claude_open_usage"),   # too old for --data-dir: rebuild Session Tiles
+    3: (409, "not_openable"),        # unknown owner
+    4: (403, "consent_denied"),      # Automation permission refused
+    5: (504, "launch_failed"),       # the account didn't start, or didn't take the link in time
+    6: (502, "send_failed"),
+}
 STATUS_KEYS = {"status", "status_since", "waiting_for"}
 
 
@@ -163,9 +175,12 @@ class Sessions:
     record, so a consumer sees dormant and archived sessions too). Index rows carry a change number
     for the /v1/sessions cursor."""
 
-    def __init__(self, cfg, machine, procs=owner.process_table, alive=R.is_live):
+    def __init__(self, cfg, machine, procs=owner.process_table, alive=R.is_live, claude_open=None,
+                 platform=None):
         self.cfg = cfg
         self.machine = machine
+        self.claude_open = claude_open
+        self.platform = platform or sys.platform
         self.lock = threading.RLock()
         self.boot = secrets.token_hex(4)
         self.seq = 0
@@ -427,7 +442,7 @@ class Sessions:
             if action == "archive":
                 return 200, self._archive(sid, body)
             if action == "open":
-                raise Refused(501, "not_implemented", "open isn't implemented yet")
+                return 200, self._open(sid)
             if action == "message":
                 raise Refused(501, "not_implemented", "messages are planned for a later version")
             raise Refused(400, "unknown_action", str(action))
@@ -451,6 +466,47 @@ class Sessions:
             raise Refused(404, "record_gone", "the desktop record no longer exists")
         self.refresh(force_index=True)
         return {"id": sid, "archived": archived}
+
+
+    def _open(self, sid):
+        """Resolves the owner from a fresh process table and hands the deep link to claude-open,
+        which delivers it to that instance (starting it if it isn't running). Blocks until
+        claude-open is done, so it runs outside the lock."""
+        row = self.get(sid)
+        if not row:
+            raise Refused(404, "not_found", sid or "")
+        if self.platform != "darwin":
+            raise Refused(409, "not_openable", "opening needs the Claude desktop app (macOS)")
+        if row.get("kind") != "code" or not row.get("host_session_id") or not row.get("owner"):
+            raise Refused(409, "not_openable", "only Claude Code sessions in the desktop app can be opened")
+        row = dict(row, owner=dict(row["owner"]))
+        owner.resolve([row], self._procs_fn())
+        exe = self.claude_open
+        if not exe or not (os.path.isfile(exe) and os.access(exe, os.X_OK)):
+            raise Refused(503, "claude_open_missing", f"claude-open not found ({exe or 'not configured'}); set "
+                                                      "claude_open in config.json or pass --claude-open")
+        own = row["owner"]
+        cmd = [exe, "--data-dir", own["data_dir"]]
+        if own["pid"]:
+            cmd += ["--pid", str(own["pid"])]
+        cmd += ["--url", DEEP_LINK.format(row["host_session_id"])]
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=OPEN_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            raise Refused(504, "launch_failed", f"claude-open didn't finish within {OPEN_TIMEOUT:.0f} s")
+        except OSError as e:
+            raise Refused(503, "claude_open_missing", str(e))
+        try:
+            out = json.loads(p.stdout.strip().splitlines()[-1])
+        except (IndexError, ValueError):
+            out = {}
+        if p.returncode != 0:
+            status, error = OPEN_ERRORS.get(p.returncode, (500, "claude_open_failed"))
+            detail = out.get("error") or p.stderr.strip() or f"claude-open exited {p.returncode}"
+            raise Refused(status, error, detail)
+        return {"id": sid, "instance": out.get("instance"), "data_dir": out.get("dataDir", own["data_dir"]),
+                "pid": out.get("pid"), "delivered": bool(out.get("delivered")),
+                "launched": bool(out.get("launched"))}
 
 
 def matches(row, params):
@@ -653,7 +709,9 @@ def stdio(sessions, stdin=None, stdout=None):
             stdout.write(line + "\n")
             stdout.flush()
 
-    def actions():
+    pending = []
+
+    def actions():  # each on its own thread: an open can take a while (consent prompt, cold start)
         for line in stdin:
             if not line.strip():
                 continue
@@ -665,10 +723,17 @@ def stdio(sessions, stdin=None, stdout=None):
                 emit("result", {"req": None, "action": None, "id": None, "status": 400,
                                 "result": {"error": "bad_request", "detail": "not a JSON object"}})
                 continue
-            status, result = sessions.act(msg.get("action"), msg.get("id"), msg)
-            emit("result", {"req": msg.get("req"), "action": msg.get("action"), "id": msg.get("id"),
-                            "status": status, "result": result})
+            t = threading.Thread(target=answer, args=(msg,), daemon=True)
+            t.start()
+            pending.append(t)
+        for t in pending:
+            t.join()
         stop.set()
+
+    def answer(msg):
+        status, result = sessions.act(msg.get("action"), msg.get("id"), msg)
+        emit("result", {"req": msg.get("req"), "action": msg.get("action"), "id": msg.get("id"),
+                        "status": status, "result": result})
 
     run(sessions, stop)
     q, snap, health = sessions.subscribe()
@@ -709,12 +774,14 @@ def main(argv=None):
     mode.add_argument("--stdio", action="store_true", help="events on stdout, actions on stdin")
     mode.add_argument("--once", action="store_true", help="print one /v1/live snapshot and exit")
     ap.add_argument("--port", type=int, help=f"port on 127.0.0.1 (default {DEFAULT_PORT})")
+    ap.add_argument("--claude-open", help="the claude-open that opens desktop sessions (default: config's "
+                                          "claude_open); Session Tiles passes its bundled one")
     ap.add_argument("--verbose", action="store_true", help="log requests to stderr")
     ap.add_argument("--version", action="version", version=f"ccsessiond {__version__} ({SCHEMA})")
     args = ap.parse_args(argv)
     cfg = R.load_config(args.config)
-    dc = daemon_config(cfg)
-    sessions = Sessions(cfg, dc["machine"])
+    dc = daemon_config(cfg, args.claude_open)
+    sessions = Sessions(cfg, dc["machine"], claude_open=dc["claude_open"])
     if args.once:
         sessions.prime()
         json.dump(sessions.snapshot(), sys.stdout, indent=1)

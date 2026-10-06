@@ -142,7 +142,7 @@ so browsers can't read it.
 | `GET /v1/sessions/{id}` | one session |
 | `GET /v1/sessions/{id}/transcript?prose=1` | `{id, entries: [{role, text, at}]}`: user prompts and assistant prose, without tool calls, tool results, thinking or API error notices |
 | `POST /v1/sessions/{id}/archive` | `{"archived": true\|false}` sets `isArchived` in the desktop record: the one flag is swapped in place and a complete copy renamed over the file. 409 `not_single_flag` unless the record holds exactly one `isArchived`; 409 `not_desktop` for a `cli` session |
-| `POST /v1/sessions/{id}/open` | 501 for now |
+| `POST /v1/sessions/{id}/open` | Opens a desktop Code session in the instance that owns it (macOS), below. `{id, instance, data_dir, pid, delivered, launched}` |
 | `POST /v1/sessions/{id}/message` | 501 (planned) |
 
 **Events.** `/v1/events` and `--stdio` send the same events. The stream covers every live session and
@@ -167,8 +167,24 @@ stream. Over `--stdio` each is one line, `{"event": "<name>", "data": …}`.
 {"event": "result", "data": {"req": "a1", "action": "archive", "id": "<session id>", "status": 200, "result": {"id": "<session id>", "archived": true}}}
 ```
 
-`status` and `result` are what the HTTP route would return. `ccsessiond --stdio` exits when stdin
-closes.
+`status` and `result` are what the HTTP route would return. Actions run concurrently, so match results
+by `req`. `ccsessiond --stdio` exits when stdin closes, after answering the actions it has.
+
+**Opening a session.** ccsessiond re-reads the process table to find the owner (`owner.data_dir` and its
+running `pid`), then runs `claude-open --data-dir <dir> [--pid <pid>] --url claude://claude.ai/epitaxy/<host
+session id>`. `claude-open` comes from Session Tiles; it sends the link to that one instance (starting it
+if it isn't running), so the macOS Automation permission belongs to Session Tiles rather than to python3.
+It is found from `--claude-open` (Session Tiles passes its bundled one when it starts `--stdio`), else
+`claude_open` in config.json. Opening can wait up to 60 s for the permission prompt or a cold start.
+
+| Status | `error` | When |
+|---|---|---|
+| 409 | `not_openable` | a `cli` or Cowork session, no host session id or owner, not macOS, or claude-open can't tell the owner |
+| 503 | `claude_open_missing` | no `claude-open` configured, or it isn't executable |
+| 403 | `consent_denied` | the Automation permission was refused (System Settings › Privacy & Security › Automation) |
+| 504 | `launch_failed` | the account didn't start or didn't take the link in time |
+| 502 | `send_failed` | the link couldn't be sent |
+| 500 | `claude_open_usage`, `claude_open_failed` | `claude-open` is too old for `--data-dir` (rebuild Session Tiles), or failed otherwise |
 
 ## As a library
 
