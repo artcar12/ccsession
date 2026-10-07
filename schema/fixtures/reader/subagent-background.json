@@ -1,0 +1,332 @@
+{
+  "rule": "A live session the live file calls idle is busy while a background agent it launched is running: from an Agent result with toolUseResult.status async_launched (agentId), or a SendMessage result with resumedAgentId, until a <task-notification> for that <task-id> with a final <status> (any but running). Busy from the earliest running launch. A copy of a notification already read (each is written as a queue-operation enqueue, then a user prompt or a queued_command attachment) does not stop a resumed agent.",
+  "dirs": [
+    "Projects/garden"
+  ],
+  "files": {
+    ".claude/projects/-garden/s-sweep.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "sweep the paths"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:05.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "tool_use",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t1",
+              "name": "Agent",
+              "input": {
+                "description": "sweep the paths",
+                "subagent_type": "general-purpose",
+                "prompt": "sweep the paths, then report back",
+                "run_in_background": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:06.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t1",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Async agent launched. agentId: a0be000000000001"
+                }
+              ]
+            }
+          ]
+        },
+        "toolUseResult": {
+          "status": "async_launched",
+          "isAsync": true,
+          "agentId": "a0be000000000001",
+          "outputFile": "/tmp/claude/tasks/a0be000000000001.output"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:10.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "end_turn",
+          "content": [
+            {
+              "type": "text",
+              "text": "Started a sweep in the background."
+            }
+          ]
+        }
+      }
+    ],
+    ".claude/projects/-garden/s-again.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "sweep the main path"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:05.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "tool_use",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t1",
+              "name": "Agent",
+              "input": {
+                "description": "sweep the main path",
+                "subagent_type": "general-purpose",
+                "prompt": "sweep the main path, then report back",
+                "run_in_background": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:06.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t1",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Async agent launched. agentId: a0be000000000002"
+                }
+              ]
+            }
+          ]
+        },
+        "toolUseResult": {
+          "status": "async_launched",
+          "isAsync": true,
+          "agentId": "a0be000000000002",
+          "outputFile": "/tmp/claude/tasks/a0be000000000002.output"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:10.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "end_turn",
+          "content": [
+            {
+              "type": "text",
+              "text": "Sweeping."
+            }
+          ]
+        }
+      },
+      {
+        "type": "queue-operation",
+        "operation": "enqueue",
+        "timestamp": "2026-10-01T12:02:00.000Z",
+        "content": "<task-notification>\n<task-id>a0be000000000002</task-id>\n<tool-use-id>t1</tool-use-id>\n<output-file>/tmp/claude/tasks/a0be000000000002.output</output-file>\n<status>completed</status>\n<summary>Agent \"sweep\" finished</summary>\n<result>Main path swept.</result>\n</task-notification>"
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:02:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "<task-notification>\n<task-id>a0be000000000002</task-id>\n<tool-use-id>t1</tool-use-id>\n<output-file>/tmp/claude/tasks/a0be000000000002.output</output-file>\n<status>completed</status>\n<summary>Agent \"sweep\" finished</summary>\n<result>Main path swept.</result>\n</task-notification>"
+        },
+        "origin": {
+          "kind": "task-notification"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:02:05.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "end_turn",
+          "content": [
+            {
+              "type": "text",
+              "text": "The main path is swept."
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:03:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "and the side path"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:03:05.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "tool_use",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t2",
+              "name": "SendMessage",
+              "input": {
+                "to": "a0be000000000002",
+                "message": "now the side path too"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:03:06.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t2",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Message sent; agent resumed."
+                }
+              ]
+            }
+          ]
+        },
+        "toolUseResult": {
+          "success": true,
+          "resumedAgentId": "a0be000000000002"
+        }
+      },
+      {
+        "type": "attachment",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:03:07.000Z",
+        "attachment": {
+          "type": "queued_command",
+          "commandMode": "task-notification",
+          "prompt": "<task-notification>\n<task-id>a0be000000000002</task-id>\n<tool-use-id>t1</tool-use-id>\n<output-file>/tmp/claude/tasks/a0be000000000002.output</output-file>\n<status>completed</status>\n<summary>Agent \"sweep\" finished</summary>\n<result>Main path swept.</result>\n</task-notification>"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:03:10.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "end_turn",
+          "content": [
+            {
+              "type": "text",
+              "text": "Asked the sweeper to do the side path."
+            }
+          ]
+        }
+      }
+    ],
+    ".claude/sessions/1.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-sweep",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "idle",
+      "entrypoint": "claude-desktop",
+      "kind": "interactive",
+      "startedAt": 1790856000000,
+      "statusUpdatedAt": 1790856072000
+    },
+    ".claude/sessions/2.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-again",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "idle",
+      "entrypoint": "claude-desktop",
+      "kind": "interactive",
+      "startedAt": 1790856000000,
+      "statusUpdatedAt": 1790856192000
+    },
+    ".claude/projects/-garden/s-sweep/subagents/agent-a0be000000000001.jsonl": [
+      {
+        "type": "user",
+        "isSidechain": true,
+        "agentId": "a0be000000000001",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:06.000Z",
+        "message": {
+          "role": "user",
+          "content": "sweep the paths"
+        }
+      }
+    ],
+    ".claude/projects/-garden/s-sweep/subagents/agent-a0be000000000001.meta.json": {
+      "agentType": "general-purpose",
+      "description": "sweep the paths"
+    }
+  },
+  "expect": {
+    "live": {
+      "s-sweep": {
+        "status": "busy",
+        "status_since": 1790856065000
+      },
+      "s-again": {
+        "status": "busy",
+        "status_since": 1790856186000
+      }
+    },
+    "sessions": {
+      "s-sweep": {
+        "status": "busy",
+        "turns": 1,
+        "outcome": "ok"
+      },
+      "s-again": {
+        "status": "busy",
+        "turns": 2,
+        "last_reply": "Asked the sweeper to do the side path."
+      }
+    }
+  }
+}

@@ -196,6 +196,61 @@ class TestSessions(DaemonCase):
         self.assertEqual((row["status"], row["error_kind"], row["api_status"], row["resets_at"], row["outcome"]),
                          ("error", "rate_limit", 429, 1790010000000, "error"))
 
+    def append(self, *entries):
+        with open(self.home.transcript, "a") as f:
+            f.write("".join(json.dumps(e) + "\n" for e in entries))
+
+    def launch_background_agent(self, minute=5):
+        g = self.home.garden
+        self.append(
+            entry("assistant", minute, [{"type": "tool_use", "id": "t9", "name": "Agent",
+                                         "input": {"description": "weed", "prompt": "weed", "run_in_background": True}}], g),
+            entry("user", minute, [{"type": "tool_result", "tool_use_id": "t9", "content": "launched"}], g,
+                  toolUseResult={"status": "async_launched", "isAsync": True, "agentId": "a0weed"}),
+            entry("assistant", minute, [{"type": "text", "text": "Weeding in the background."}], g))
+
+    def notify(self, minute=7):
+        self.append({"type": "queue-operation", "operation": "enqueue",
+                     "timestamp": "2026-10-01T12:%02d:00.000Z" % minute,
+                     "content": "<task-notification>\n<task-id>a0weed</task-id>\n<status>completed</status>\n"
+                                "<summary>Agent \"weed\" finished</summary>\n</task-notification>"})
+
+    def test_running_subagent_keeps_an_idle_session_busy(self):
+        """The live file says idle throughout: the transcript scan alone moves the status."""
+        self.sessions.prime()
+        self.sessions.refresh(force_index=True)
+        self.assertEqual(self.sessions.get("s-live")["status"], "idle")
+        for change, status, since in ((self.launch_background_agent, "busy", "12:05"),
+                                      (self.notify, "idle", "12:07")):
+            change()
+            events = [e for e in self.sessions.refresh(force_index=True) if e[0] != "health"]
+            (kind, row), = events  # an upsert: the transcript's last and last_reply moved too
+            self.assertEqual((kind, row["id"], row["status"], row["status_since"]),
+                             ("upsert", "s-live", status, R.iso_ms("2026-10-01T%s:00Z" % since)))
+            self.assertEqual(self.sessions.get("s-live")["status"], status)
+
+    def test_idle_within_2s_after_the_last_subagent(self):
+        """With the real poll intervals, the final notification turns the session idle within about
+        2 s (INDEX_POLL, plus the scan)."""
+        self.launch_background_agent()
+        stop = threading.Event()
+        D.run(self.sessions, stop)
+        try:
+            self.assertEqual(self.sessions.get("s-live")["status"], "busy")
+            while self.sessions._last_index < 0:  # the index loop's first pass has started...
+                time.sleep(0.01)
+            with self.sessions._scan_lock:  # ...and finished, so a full INDEX_POLL wait follows
+                pass
+            t0 = time.monotonic()
+            self.notify()
+            while self.sessions.get("s-live")["status"] != "idle" and time.monotonic() - t0 < 5:
+                time.sleep(0.05)
+            elapsed = time.monotonic() - t0
+        finally:
+            stop.set()
+        self.assertEqual(self.sessions.get("s-live")["status"], "idle")
+        self.assertLess(elapsed, D.INDEX_POLL + 0.5)
+
 
 class TestArchive(unittest.TestCase):
     def test_swaps_one_flag_atomically(self):

@@ -196,6 +196,15 @@ def _lay_over(row, lv):
     row["dormant"] = False
     if row.get("_error_newest"):
         row.update(status="error", status_since=row.get("_error_at") or lv.get("status_since"), waiting_for=None)
+    elif lv.get("status") == "idle" and lv.get("started"):
+        # Subagents: idle in the live file while a subagent this process launched is still running
+        # is busy, from the earliest such launch; once the last one finishes, idle from then on.
+        running = [ms for ms in (row.get("_agents") or {}).values() if ms and ms >= lv["started"] - 1000]
+        done = row.get("_agents_done_at")
+        if running:
+            row.update(status="busy", status_since=min(running))
+        elif done and done > (row.get("status_since") or 0):
+            row["status_since"] = done
     return row
 
 
@@ -207,7 +216,8 @@ def _same_session(row, lv):
 
 def overlay_live(rows, live):
     """Marks the index rows that have a live process: their live status, and not dormant. A live
-    session whose newest transcript entry is an API error has status error from that entry on."""
+    session whose newest transcript entry is an API error has status error from that entry on. An
+    idle one with a subagent still running (see TranscriptScan) is busy."""
     for lv in live:
         row = rows.get(lv.get("id"))
         if row and _same_session(row, lv):
@@ -356,6 +366,30 @@ def api_error(e):
             "at": iso_ms(e.get("timestamp"))}
 
 
+AGENT_TOOLS = ("Agent", "Task")  # Task is the tool's older name
+NOTIFICATION = re.compile(r"<task-notification>.*?</task-notification>", re.S)
+TASK_ID = re.compile(r"<task-id>([^<]+)</task-id>")
+TASK_STATUS = re.compile(r"<status>([a-z_]+)</status>")
+
+
+def notifications(e):
+    """The <task-notification> blocks a main-thread entry carries: in a queue-operation enqueue
+    (always written when a background task stops), a user prompt (when the notification starts a
+    turn) or a queued_command attachment (when it is absorbed mid-turn). The same notification is
+    often written two or three times; other entry types (prompt snapshots, queue removals) repeat
+    it too and are not read."""
+    t = e.get("type")
+    if t == "queue-operation" and e.get("operation") == "enqueue":
+        text = e.get("content")
+    elif t == "user":
+        text = _text((e.get("message") or {}).get("content"))
+    elif t == "attachment" and (e.get("attachment") or {}).get("type") == "queued_command":
+        text = e["attachment"].get("prompt")
+    else:
+        return []
+    return NOTIFICATION.findall(text) if isinstance(text, str) else []
+
+
 def outcome_of(err, err_at, interrupt_at, newest_at):
     """(outcome, error facts or None, error is the newest entry). err is the last assistant entry's
     API error (None when that entry succeeded); err_at, interrupt_at and newest_at are main-thread
@@ -385,6 +419,12 @@ class TranscriptScan:
         self.mentions = {}
         # main-thread positions for the outcome: see outcome_of
         self.err = self.err_at = self.interrupt_at = self.newest_at = None
+        # subagents: see _agent_result and _notified
+        self.calls = {}         # Agent/TaskStop tool_use id -> (tool, launch ms, task id) until its result
+        self.agents = {}        # background agent id -> launch ms until a final notification
+        self.agents_done_at = None
+        self.ended = {}         # task id -> ms of a final notification for an agent not (yet) started
+        self.seen = set()       # entries (uuid) and notifications (hash) already read: see _first_copy
 
     def stale(self, st):
         """The file was replaced or truncated since the last read: start over."""
@@ -425,10 +465,15 @@ class TranscriptScan:
         gb = e.get("gitBranch")
         if gb and gb != "HEAD":
             self.branch = gb
-        if e.get("isSidechain") or e.get("isMeta"):
+        if e.get("isSidechain"):
+            return
+        if "<task-notification>" in line:
+            self._notified(e)
+        if e.get("isMeta"):
             return
         msg = e.get("message") or {}
         if t == "user":
+            self._agent_result(e, msg.get("content"))
             self.newest_at = n
             txt = _text(msg.get("content")).strip()
             if txt.startswith(INTERRUPTED):
@@ -452,6 +497,74 @@ class TranscriptScan:
                     if isinstance(b, dict) and b.get("type") == "tool_use":
                         for hit in self.root_rx.findall(json.dumps(b.get("input", {}))):
                             self.mentions[hit] = self.mentions.get(hit, 0) + 1
+                        if b.get("name") in AGENT_TOOLS + ("TaskStop",) and b.get("id") and self._first_copy(e):
+                            inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+                            self.calls[b["id"]] = (b["name"], iso_ms(ts), inp.get("task_id") or inp.get("shell_id"))
+
+    def _first_copy(self, e, key=None):
+        """False for an entry (by uuid, or key) already read. A transcript can hold the same entries
+        twice (the same uuid further down the file), and every notification is written two or three
+        times; a second copy must not launch or stop an agent again."""
+        key = key if key is not None else e.get("uuid")
+        if key is None:
+            return True
+        if key in self.seen:
+            return False
+        self.seen.add(key)
+        return True
+
+    def _agent_result(self, e, content):
+        """Subagent launches and stops from tool results. An Agent call is running in the foreground
+        until its result; a result with status async_launched starts a background agent (agentId),
+        which runs until a final notification (see _notified). A SendMessage that resumes an agent
+        (resumedAgentId) starts it again; a TaskStop result stops one."""
+        if not isinstance(content, list):
+            return
+        tur = e.get("toolUseResult") if isinstance(e.get("toolUseResult"), dict) else {}
+        at = iso_ms(e.get("timestamp"))
+        for b in content:
+            if not (isinstance(b, dict) and b.get("type") == "tool_result"):
+                continue
+            tool, launched, task = self.calls.pop(b.get("tool_use_id"), (None, None, None))
+            if tool in AGENT_TOOLS:
+                if tur.get("status") == "async_launched" and isinstance(tur.get("agentId"), str):
+                    self._start(tur["agentId"], launched or at)
+                else:
+                    self.agents_done_at = at or self.agents_done_at
+            elif tool == "TaskStop" and not b.get("is_error") and self.agents.pop(task, None):
+                self.agents_done_at = at or self.agents_done_at
+        if isinstance(tur.get("resumedAgentId"), str) and self._first_copy(e):
+            self._start(tur["resumedAgentId"], at)
+
+    def _notified(self, e):
+        """A background agent stops at the first notification for its id with a final status (any
+        but running); one notification can name several ids. A copy of a notification already read
+        is skipped, so a late copy of an earlier run's notification doesn't stop a resumed agent."""
+        for block in notifications(e):
+            status = TASK_STATUS.search(block)
+            if not self._first_copy(e, hash(block)) or not status or status.group(1) == "running":
+                continue
+            at = iso_ms(e.get("timestamp"))
+            for task in TASK_ID.findall(block):
+                if self.agents.pop(task.strip(), None) is not None:
+                    self.agents_done_at = at or self.agents_done_at
+                else:
+                    self.ended[task.strip()] = at
+
+    def _start(self, agent, launched):
+        """A background agent starts, unless its notification came first: with many agents launched
+        in one message, a quick one can finish before its launch result is written."""
+        if agent in self.ended:
+            self.agents_done_at = max(filter(None, [self.agents_done_at, self.ended.pop(agent)]), default=None)
+        else:
+            self.agents[agent] = launched
+
+    def running_agents(self):
+        """{id: launch ms} of the subagents still running: foreground Agent calls without a result
+        (by tool_use id) and background agents without a final notification (by agent id)."""
+        out = {tid: ms for tid, (tool, ms, _) in self.calls.items() if tool in AGENT_TOOLS}
+        out.update(self.agents)
+        return out
 
     def facts(self):
         outcome, error, error_newest = outcome_of(self.err, self.err_at, self.interrupt_at, self.newest_at)
@@ -462,6 +575,7 @@ class TranscriptScan:
             "created": iso_ms(self.t0), "last": iso_ms(self.t1), "turns": self.turns,
             "mentions": dict(self.mentions),
             "outcome": outcome, "error": error, "error_newest": error_newest,
+            "agents": self.running_agents(), "agents_done_at": self.agents_done_at,
         }
 
 
@@ -537,6 +651,8 @@ def build_session(scan, meta, cfg):
         # Private (public() drops them): what overlay_live, archive and the transcript route need.
         "_error_newest": bool(s.get("error_newest")),
         "_error_at": err.get("at"),
+        "_agents": s.get("agents") or {},
+        "_agents_done_at": s.get("agents_done_at"),
         "_transcript": s.get("_path"),
         "_record": meta.get("_path"),
     }

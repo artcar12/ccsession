@@ -93,6 +93,15 @@ Errors go to `~/.local/state/ccsession/ccsessiond.log`. `--dry-run` prints the f
   a turn. Otherwise `ok`.
 - **Error status:** a live session whose newest entry is that API error has `status: "error"` from the
   error's time, until a newer entry arrives.
+- **Subagents:** a live session whose live file says `idle` is `busy` while a subagent it launched is
+  still running, from the earliest such launch. Running means a foreground `Agent` (or `Task`) call with
+  no `tool_result` yet, or a background agent (a result with `toolUseResult.status: "async_launched"`, or
+  a `SendMessage` result with `resumedAgentId`) with no `<task-notification>` for its `<task-id>` with a
+  final `<status>` (anything but `running`). Only launches after the live process started count
+  (`startedAt` − 1 s). When the last one finishes after the live file went idle, the session is idle from
+  that notification. Copies of a notification or of an entry (same `uuid`) count once. `waiting` and
+  `error` are left as they are. Claude Code itself keeps the file `busy` while background agents run
+  unless `CLAUDE_CODE_BG_TASKS_REPORT_RUNNING=false`; this rule covers that case and older builds.
 - **Owner:** a desktop session's `owner` is `{data_dir, pid}`: the data dir holding its record, and that
   instance's main process. For a live session, the ppid chain from its pid (`claude` → `disclaimer` →
   `Claude`) gives the pid when it reaches the instance holding the record; otherwise the running

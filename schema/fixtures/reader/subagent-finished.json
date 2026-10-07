@@ -1,0 +1,512 @@
+{
+  "rule": "Once the last subagent has finished, a live session the live file calls idle is idle again; if the live file went idle while the subagent ran, idle from the final notification on. A notification written before its launch result still ends that agent; one notification can name several task ids; entries repeated further down the transcript (same uuid) do not launch an agent again. A session that ran no subagent keeps the live file's idle.",
+  "dirs": [
+    "Projects/garden"
+  ],
+  "files": {
+    ".claude/projects/-garden/s-raked.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "rake the leaves"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:05.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "tool_use",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t1",
+              "name": "Agent",
+              "input": {
+                "description": "rake the leaves",
+                "subagent_type": "general-purpose",
+                "prompt": "rake the leaves, then report back",
+                "run_in_background": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:06.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t1",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Async agent launched. agentId: a0d0000000000001"
+                }
+              ]
+            }
+          ]
+        },
+        "toolUseResult": {
+          "status": "async_launched",
+          "isAsync": true,
+          "agentId": "a0d0000000000001",
+          "outputFile": "/tmp/claude/tasks/a0d0000000000001.output"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:10.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "end_turn",
+          "content": [
+            {
+              "type": "text",
+              "text": "Raking in the background."
+            }
+          ]
+        }
+      },
+      {
+        "type": "queue-operation",
+        "operation": "enqueue",
+        "timestamp": "2026-10-01T12:03:00.000Z",
+        "content": "<task-notification>\n<task-id>a0d0000000000001</task-id>\n<tool-use-id>t1</tool-use-id>\n<output-file>/tmp/claude/tasks/a0d0000000000001.output</output-file>\n<status>completed</status>\n<summary>Agent \"sweep\" finished</summary>\n<result>Leaves raked.</result>\n</task-notification>"
+      }
+    ],
+    ".claude/projects/-garden/s-early.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "oil the gate and trim the hedge"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:05.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "tool_use",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t1",
+              "name": "Agent",
+              "input": {
+                "description": "oil the gate",
+                "subagent_type": "general-purpose",
+                "prompt": "oil the gate, then report back",
+                "run_in_background": true
+              }
+            }
+          ]
+        },
+        "uuid": "u-call-1"
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:05.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "tool_use",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t2",
+              "name": "Agent",
+              "input": {
+                "description": "trim the hedge",
+                "subagent_type": "general-purpose",
+                "prompt": "trim the hedge, then report back",
+                "run_in_background": true
+              }
+            }
+          ]
+        },
+        "uuid": "u-call-2"
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:05.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "tool_use",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t4",
+              "name": "Agent",
+              "input": {
+                "description": "weed the border",
+                "subagent_type": "general-purpose",
+                "prompt": "weed the border, then report back",
+                "run_in_background": true
+              }
+            }
+          ]
+        },
+        "uuid": "u-call-4"
+      },
+      {
+        "type": "queue-operation",
+        "operation": "enqueue",
+        "timestamp": "2026-10-01T12:01:07.000Z",
+        "content": "<task-notification>\n<task-id>a0d0000000000002</task-id>\n<tool-use-id>t1</tool-use-id>\n<output-file>/tmp/claude/tasks/a0d0000000000002.output</output-file>\n<status>completed</status>\n<summary>Agent \"sweep\" finished</summary>\n<result>Gate oiled.</result>\n</task-notification>"
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:08.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t1",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Async agent launched. agentId: a0d0000000000002"
+                }
+              ]
+            }
+          ]
+        },
+        "toolUseResult": {
+          "status": "async_launched",
+          "isAsync": true,
+          "agentId": "a0d0000000000002",
+          "outputFile": "/tmp/claude/tasks/a0d0000000000002.output"
+        },
+        "uuid": "u-launch-1"
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:08.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t2",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Async agent launched. agentId: a0d0000000000003"
+                }
+              ]
+            }
+          ]
+        },
+        "toolUseResult": {
+          "status": "async_launched",
+          "isAsync": true,
+          "agentId": "a0d0000000000003",
+          "outputFile": "/tmp/claude/tasks/a0d0000000000003.output"
+        },
+        "uuid": "u-launch-2"
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:08.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t4",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Async agent launched. agentId: a0d0000000000005"
+                }
+              ]
+            }
+          ]
+        },
+        "toolUseResult": {
+          "status": "async_launched",
+          "isAsync": true,
+          "agentId": "a0d0000000000005",
+          "outputFile": "/tmp/claude/tasks/a0d0000000000005.output"
+        },
+        "uuid": "u-launch-4"
+      },
+      {
+        "type": "queue-operation",
+        "operation": "enqueue",
+        "timestamp": "2026-10-01T12:02:00.000Z",
+        "content": "<task-notification>\n<task-id>a0d0000000000003</task-id>\n<task-id>a0d0000000000005</task-id>\n<status>stopped</status>\n<summary>2 agents stopped</summary>\n</task-notification>"
+      },
+      {
+        "type": "attachment",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:02:00.000Z",
+        "attachment": {
+          "type": "queued_command",
+          "commandMode": "task-notification",
+          "prompt": "<task-notification>\n<task-id>a0d0000000000003</task-id>\n<task-id>a0d0000000000005</task-id>\n<status>stopped</status>\n<summary>2 agents stopped</summary>\n</task-notification>"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:02:05.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "end_turn",
+          "content": [
+            {
+              "type": "text",
+              "text": "Gate oiled; hedge trimming stopped."
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:05.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "tool_use",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t2",
+              "name": "Agent",
+              "input": {
+                "description": "trim the hedge",
+                "subagent_type": "general-purpose",
+                "prompt": "trim the hedge, then report back",
+                "run_in_background": true
+              }
+            }
+          ]
+        },
+        "uuid": "u-call-2"
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:08.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t2",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Async agent launched. agentId: a0d0000000000003"
+                }
+              ]
+            }
+          ]
+        },
+        "toolUseResult": {
+          "status": "async_launched",
+          "isAsync": true,
+          "agentId": "a0d0000000000003",
+          "outputFile": "/tmp/claude/tasks/a0d0000000000003.output"
+        },
+        "uuid": "u-launch-2"
+      },
+      {
+        "type": "attachment",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:02:00.000Z",
+        "attachment": {
+          "type": "queued_command",
+          "commandMode": "task-notification",
+          "prompt": "<task-notification>\n<task-id>a0d0000000000003</task-id>\n<task-id>a0d0000000000005</task-id>\n<status>stopped</status>\n<summary>2 agents stopped</summary>\n</task-notification>"
+        }
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:04:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "count the beds"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:04:05.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "tool_use",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t3",
+              "name": "Agent",
+              "input": {
+                "description": "count the raised beds",
+                "subagent_type": "general-purpose",
+                "prompt": "count the raised beds, then report back"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:04:40.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t3",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Beds counted: 6.\nagentId: a0d0000000000004"
+                }
+              ]
+            }
+          ]
+        },
+        "toolUseResult": {
+          "status": "completed",
+          "agentId": "a0d0000000000004",
+          "content": [
+            {
+              "type": "text",
+              "text": "Beds counted: 6."
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:04:45.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "end_turn",
+          "content": [
+            {
+              "type": "text",
+              "text": "Six beds."
+            }
+          ]
+        }
+      }
+    ],
+    ".claude/projects/-garden/s-quiet.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "mow the lawn"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:30.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "end_turn",
+          "content": [
+            {
+              "type": "text",
+              "text": "Mowed."
+            }
+          ]
+        }
+      }
+    ],
+    ".claude/sessions/1.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-raked",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "idle",
+      "entrypoint": "claude-desktop",
+      "kind": "interactive",
+      "startedAt": 1790856000000,
+      "statusUpdatedAt": 1790856072000
+    },
+    ".claude/sessions/2.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-early",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "idle",
+      "entrypoint": "claude-desktop",
+      "kind": "interactive",
+      "startedAt": 1790856000000,
+      "statusUpdatedAt": 1790856287000
+    },
+    ".claude/sessions/3.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-quiet",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "idle",
+      "entrypoint": "claude-desktop",
+      "kind": "interactive",
+      "startedAt": 1790856000000,
+      "statusUpdatedAt": 1790856091000
+    }
+  },
+  "expect": {
+    "live": {
+      "s-raked": {
+        "status": "idle",
+        "status_since": 1790856180000
+      },
+      "s-early": {
+        "status": "idle",
+        "status_since": 1790856287000
+      },
+      "s-quiet": {
+        "status": "idle",
+        "status_since": 1790856091000
+      }
+    },
+    "sessions": {
+      "s-raked": {
+        "status": "idle",
+        "status_since": 1790856180000
+      },
+      "s-early": {
+        "status": "idle",
+        "turns": 2,
+        "last_reply": "Six beds."
+      },
+      "s-quiet": {
+        "status": "idle",
+        "turns": 1
+      }
+    }
+  }
+}

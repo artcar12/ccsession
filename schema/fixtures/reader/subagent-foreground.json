@@ -1,0 +1,161 @@
+{
+  "rule": "A live session the live file calls idle is busy while an Agent (or Task) tool call it made has no tool_result yet, from that call on. Only calls made after the live process started count (launch >= startedAt - 1s): a call left without a result by an earlier process is not running. Subagent transcripts (<session>/subagents/agent-*.jsonl) are not sessions.",
+  "dirs": [
+    "Projects/garden"
+  ],
+  "files": {
+    ".claude/projects/-garden/s-survey.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:01:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "survey the beds"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:05.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "tool_use",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t1",
+              "name": "Agent",
+              "input": {
+                "description": "count the raised beds",
+                "subagent_type": "general-purpose",
+                "prompt": "count the raised beds, then report back"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    ".claude/projects/-garden/s-resumed-cli.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T11:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "water the beds"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T11:00:05.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "tool_use",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t1",
+              "name": "Agent",
+              "input": {
+                "description": "check the hoses",
+                "subagent_type": "general-purpose",
+                "prompt": "check the hoses, then report back"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "gitBranch": "main",
+        "timestamp": "2026-10-01T12:00:20.000Z",
+        "message": {
+          "role": "user",
+          "content": "carry on"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:00:25.000Z",
+        "message": {
+          "role": "assistant",
+          "stop_reason": "end_turn",
+          "content": [
+            {
+              "type": "text",
+              "text": "Watered."
+            }
+          ]
+        }
+      }
+    ],
+    ".claude/sessions/1.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-survey",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "idle",
+      "entrypoint": "claude-desktop",
+      "kind": "interactive",
+      "startedAt": 1790856000000,
+      "statusUpdatedAt": 1790856120000
+    },
+    ".claude/sessions/2.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-resumed-cli",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "idle",
+      "entrypoint": "cli",
+      "kind": "interactive",
+      "startedAt": 1790856000000,
+      "statusUpdatedAt": 1790856030000
+    },
+    ".claude/projects/-garden/s-survey/subagents/agent-a0fe000000000001.jsonl": [
+      {
+        "type": "user",
+        "isSidechain": true,
+        "agentId": "a0fe000000000001",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:01:06.000Z",
+        "message": {
+          "role": "user",
+          "content": "count the raised beds"
+        }
+      }
+    ],
+    ".claude/projects/-garden/s-survey/subagents/agent-a0fe000000000001.meta.json": {
+      "agentType": "general-purpose",
+      "description": "count the raised beds"
+    }
+  },
+  "expect": {
+    "live": {
+      "s-survey": {
+        "status": "busy",
+        "status_since": 1790856065000,
+        "waiting_for": null
+      },
+      "s-resumed-cli": {
+        "status": "idle",
+        "status_since": 1790856030000
+      }
+    },
+    "sessions": {
+      "s-survey": {
+        "status": "busy",
+        "status_since": 1790856065000,
+        "turns": 1
+      },
+      "s-resumed-cli": {
+        "status": "idle",
+        "turns": 2,
+        "last_reply": "Watered."
+      }
+    }
+  }
+}

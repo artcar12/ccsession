@@ -168,7 +168,8 @@ class TestReaderRules(unittest.TestCase):
         names = {os.path.splitext(os.path.basename(p))[0] for p in reader_cases()}
         self.assertEqual(names, {"live-without-proc-start", "proc-start-mismatch", "shared-account-two-instances",
                                  "dormant", "archived", "cowork", "discover-data-dirs", "api-error",
-                                 "error-cleared", "interrupted"})
+                                 "error-cleared", "interrupted", "subagent-foreground", "subagent-background",
+                                 "subagent-finished"})
 
     def test_cases(self):
         for path in reader_cases():
