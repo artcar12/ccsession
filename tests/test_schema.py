@@ -169,7 +169,7 @@ class TestReaderRules(unittest.TestCase):
         self.assertEqual(names, {"live-without-proc-start", "proc-start-mismatch", "shared-account-two-instances",
                                  "dormant", "archived", "cowork", "discover-data-dirs", "api-error",
                                  "error-cleared", "interrupted", "subagent-foreground", "subagent-background",
-                                 "subagent-finished"})
+                                 "subagent-finished", "background-shell"})
 
     def test_cases(self):
         for path in reader_cases():

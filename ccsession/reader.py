@@ -136,6 +136,15 @@ def is_live(pid, proc_start):
     return not proc_start or same_start(proc_start, real_start_utc(pid))
 
 
+def live_status(raw):
+    """The live file's status as a Session v1 status. "shell" (Claude Code's interactive CLI: the turn
+    ended but a background shell it started is still running) is busy, as Claude Code itself shows it;
+    anything not known is unknown."""
+    if raw == "shell":
+        return "busy"
+    return raw if raw in ("waiting", "idle", "busy") else "unknown"
+
+
 def read_live(sessions_dir, check=True, failures=None, alive=is_live):
     """Live sessions. check=False skips the liveness test (for fixtures); alive(pid, procStart) is
     the test. Files that fail to parse are appended to failures when a list is given."""
@@ -158,7 +167,7 @@ def read_live(sessions_dir, check=True, failures=None, alive=is_live):
             "pid": pid,
             "cwd": d.get("cwd"),
             "title": d.get("name"),
-            "status": d.get("status") if d.get("status") in ("waiting", "idle", "busy") else "unknown",
+            "status": live_status(d.get("status")),
             "waiting_for": wf if isinstance(wf, str) else (json.dumps(wf) if wf else None),
             "entrypoint": d.get("entrypoint"),
             "started": to_ms(d.get("startedAt")),

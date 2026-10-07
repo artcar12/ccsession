@@ -1,0 +1,149 @@
+{
+  "rule": "The interactive CLI writes status \"shell\" when its turn has ended but a background shell it started (Bash run_in_background) is still running. That is busy, from the file's statusUpdatedAt, as Claude Code itself shows it; when the shell finishes the file goes back to busy or idle on its own. A status the reader doesn't know is unknown.",
+  "dirs": [
+    "Projects/garden"
+  ],
+  "files": {
+    ".claude/projects/-garden/s-shell.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "start the sprinkler timer in the background"
+        },
+        "gitBranch": "main"
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:00:04.000Z",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t1",
+              "name": "Bash",
+              "input": {
+                "command": "sleep 600 && echo sprinklers off",
+                "run_in_background": true,
+                "description": "Run the sprinkler timer"
+              }
+            }
+          ],
+          "stop_reason": "tool_use"
+        }
+      },
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:00:05.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t1",
+              "content": "Command running in background with ID: b1. Output is being written to: /tmp/tasks/b1.output"
+            }
+          ]
+        },
+        "toolUseResult": {
+          "backgroundTaskId": "b1"
+        }
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:00:08.000Z",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Timer started."
+            }
+          ],
+          "stop_reason": "end_turn"
+        }
+      }
+    ],
+    ".claude/projects/-garden/s-newer.jsonl": [
+      {
+        "type": "user",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": "check the soil"
+        },
+        "gitBranch": "main"
+      },
+      {
+        "type": "assistant",
+        "cwd": "{{HOME}}/Projects/garden",
+        "timestamp": "2026-10-01T12:00:06.000Z",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Soil is damp."
+            }
+          ],
+          "stop_reason": "end_turn"
+        }
+      }
+    ],
+    ".claude/sessions/1.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-shell",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "shell",
+      "entrypoint": "cli",
+      "kind": "interactive",
+      "startedAt": 1790856000000,
+      "statusUpdatedAt": 1790856008000
+    },
+    ".claude/sessions/2.json": {
+      "pid": "{{PID}}",
+      "sessionId": "s-newer",
+      "cwd": "{{HOME}}/Projects/garden",
+      "status": "dreaming",
+      "entrypoint": "cli",
+      "kind": "interactive",
+      "startedAt": 1790856000000,
+      "statusUpdatedAt": 1790856006000
+    }
+  },
+  "expect": {
+    "live": {
+      "s-shell": {
+        "status": "busy",
+        "status_since": 1790856008000,
+        "waiting_for": null,
+        "kind": "cli",
+        "project": "garden"
+      },
+      "s-newer": {
+        "status": "unknown",
+        "status_since": 1790856006000
+      }
+    },
+    "sessions": {
+      "s-shell": {
+        "status": "busy",
+        "status_since": 1790856008000,
+        "turns": 1,
+        "last_reply": "Timer started."
+      },
+      "s-newer": {
+        "status": "unknown",
+        "turns": 1,
+        "last_reply": "Soil is damp."
+      }
+    }
+  }
+}

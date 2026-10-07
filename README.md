@@ -102,6 +102,11 @@ Errors go to `~/.local/state/ccsession/ccsessiond.log`. `--dry-run` prints the f
   that notification. Copies of a notification or of an entry (same `uuid`) count once. `waiting` and
   `error` are left as they are. Claude Code itself keeps the file `busy` while background agents run
   unless `CLAUDE_CODE_BG_TASKS_REPORT_RUNNING=false`; this rule covers that case and older builds.
+- **Background shells:** the interactive CLI writes `shell` when its turn has ended but a background
+  shell it started (`Bash` with `run_in_background`) is still running. The reader reports it as `busy`
+  from the file's `statusUpdatedAt`, as Claude Code itself shows it; when the shell finishes the CLI
+  starts a follow-up turn (`busy`) and then goes `idle`. Desktop sessions write `idle` here. Any other
+  status the reader doesn't know is `unknown`.
 - **Owner:** a desktop session's `owner` is `{data_dir, pid}`: the data dir holding its record, and that
   instance's main process. For a live session, the ppid chain from its pid (`claude` → `disclaimer` →
   `Claude`) gives the pid when it reaches the instance holding the record; otherwise the running

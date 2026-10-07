@@ -158,6 +158,16 @@ class TestSessions(DaemonCase):
         (kind, row), = [e for e in self.sessions.refresh() if e[0] != "health"]
         self.assertEqual((kind, row["id"], row["status"], row["dormant"]), ("upsert", "s-live", None, True))
 
+    def test_background_shell_is_busy_until_the_file_moves_on(self):
+        self.sessions.prime()
+        self.sessions.refresh(force_index=True)
+        self.home.set_live("shell", 1790000040000)
+        self.assertEqual(self.sessions.refresh(), [("status", {"id": "s-live", "status": "busy",
+                                                               "status_since": 1790000040000, "waiting_for": None})])
+        self.home.set_live("idle", 1790000050000)
+        self.assertEqual(self.sessions.refresh(), [("status", {"id": "s-live", "status": "idle",
+                                                               "status_since": 1790000050000, "waiting_for": None})])
+
     def test_stream_covers_live_and_desktop_sessions(self):
         self.sessions.prime()
         self.sessions.refresh(force_index=True)
